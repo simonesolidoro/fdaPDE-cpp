@@ -35,6 +35,7 @@ class SRPDE {
     template <typename GeoFrame, typename Penalty>
     SRPDE(const std::string& formula, const GeoFrame& gf, Penalty&& penalty) noexcept :
         solver_(), geo_category_(gf[0].category().begin(), gf[0].category().end()) {
+            //std::cout<<"costruzione modello da threadid: "<<std::this_thread::get_id()<<std::endl;
         discretize(penalty.get());
         analyze_data(formula, gf);
     }

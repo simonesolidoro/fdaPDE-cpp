@@ -455,9 +455,9 @@ struct fe_ls_elliptic {
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
    protected:
-    thread_local std::optional<double> lambda_saved_ = -1;
-    thread_local sparse_solver_t invA_;
-    thread_local matrix_t b_;
+    static thread_local std::optional<double> lambda_saved_ = -1;
+    static thread_local sparse_solver_t invA_;
+    static thread_local matrix_t b_;
     // matrices for Hutchinson stochastic estimation of Tr[S]
     std::optional<matrix_t> Ys_, Bs_, Us_;
   
@@ -469,7 +469,7 @@ struct fe_ls_elliptic {
     diag_matrix_t D_;       // vector of regions' measures (areal sampling)
     mutable sparse_solver_t invR0_;
     std::optional<sparse_matrix_t> B_;   // \Psi matrix corrected for missing observations
-    thread_local vector_t f_, beta_, g_;
+    static thread_local vector_t f_, beta_, g_;
     // basis system evaluation handles
     std::function<sparse_matrix_t(const matrix_t& locs)> point_eval_;
     std::function<std::pair<sparse_matrix_t, vector_t>(const binary_t& locs)> areal_eval_;
@@ -483,7 +483,7 @@ struct fe_ls_elliptic {
     matrix_t XtWX_;            // n_covs x n_covs matrix X^\top * W * X
     dense_solver_t invXtWX_;   // factorization of n_covs x n_covs matrix X^\top * W * X
     matrix_t invXtWXXtW_;      // n_covs x n_obs matrix (X^\top * X)^{-1} * (X^\top W)
-    thread_local bool W_changed_;
+    static thread_local bool W_changed_;
 };
 
 }   // namespace internals

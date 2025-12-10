@@ -121,7 +121,7 @@ class SRPDE {
        private:
         SRPDE* model_;
         int n_ = 0, q_ = 0;
-        thread_local edf_cache_t edf_cache_;
+        edf_cache_t edf_cache_;
         // stochastic edf approximation parameter
         int r_, seed_;
     };

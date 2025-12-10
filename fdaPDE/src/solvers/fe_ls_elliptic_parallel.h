@@ -149,13 +149,18 @@ struct fe_ls_elliptic {
         areal_eval_ = [fe_space = bilinear_form.trial_space()](const binary_t& locs) -> decltype(auto) {
             return internals::areal_basis_eval(fe_space, locs);
         };
-	b_.resize(2 * n_dofs_, 1);
+	b_.resize(2 * n_dofs_, 1); //!!!! questo resize viene fatto solo nel b_ del main thread. devo farlo in tutti
 	// store Dirichlet boundary condition
 	auto& dof_handler = bilinear_form.trial_space().dof_handler();
 	dirichlet_dofs_ = dof_handler.dirichlet_dofs();
 	dirichlet_vals_ = dof_handler.dirichlet_values();
         return;
     }
+
+    void resize_b(){//metodo da chiamare nei thread che non inizializzano SRPDE per avere giusta size di b_
+        b_.resize(2 * n_dofs_, 1);
+    }
+    
     // non-parametric fit
     // \sum_i w_i * (y_i - f(p_i))^2 + \int_D (Lf - u)^2
     template <typename DataLocs, typename WeightMatrix>
@@ -455,9 +460,9 @@ struct fe_ls_elliptic {
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
    protected:
-    static thread_local std::optional<double> lambda_saved_ = -1;
-    static thread_local sparse_solver_t invA_;
-    static thread_local matrix_t b_;
+    inline static thread_local std::optional<double> lambda_saved_ = -1;
+    inline static thread_local sparse_solver_t invA_;
+    inline static thread_local matrix_t b_;
     // matrices for Hutchinson stochastic estimation of Tr[S]
     std::optional<matrix_t> Ys_, Bs_, Us_;
   
@@ -469,7 +474,7 @@ struct fe_ls_elliptic {
     diag_matrix_t D_;       // vector of regions' measures (areal sampling)
     mutable sparse_solver_t invR0_;
     std::optional<sparse_matrix_t> B_;   // \Psi matrix corrected for missing observations
-    static thread_local vector_t f_, beta_, g_;
+    inline static thread_local vector_t f_, beta_, g_;
     // basis system evaluation handles
     std::function<sparse_matrix_t(const matrix_t& locs)> point_eval_;
     std::function<std::pair<sparse_matrix_t, vector_t>(const binary_t& locs)> areal_eval_;
@@ -483,7 +488,7 @@ struct fe_ls_elliptic {
     matrix_t XtWX_;            // n_covs x n_covs matrix X^\top * W * X
     dense_solver_t invXtWX_;   // factorization of n_covs x n_covs matrix X^\top * W * X
     matrix_t invXtWXXtW_;      // n_covs x n_obs matrix (X^\top * X)^{-1} * (X^\top W)
-    static thread_local bool W_changed_;
+    inline static thread_local bool W_changed_;
 };
 
 }   // namespace internals

@@ -64,15 +64,15 @@ class SRPDE {
     int n_covs() const { return n_covs_; }
     int n_obs() const { return n_obs_; }
     double edf(int r = 100, int seed = random_seed) { return solver_.edf(r, seed); }
-    const vector_t& response() const { return solver_.response(); }
+    const vector_t& response() const { return solver_.response(); } //response è const in solver
     const matrix_t& design_matrix() const { return solver_.design_matrix(); }
     const sparse_matrix_t& weights() const { return solver_.weights(); }
     vector_t fitted() const {
-        vector_t fitted_ = solver_.fn();
+        vector_t fitted_ = solver_.fn(); //fn è const in solver 
         if constexpr (requires(solver_t s) { s.design_matrix(); }) {
             if (n_covs_ != 0) { fitted_ += solver_.design_matrix() * beta(); }
         }
-        return fitted_;
+        return fitted_;//non serve thread_local fitted_ perché variabile locale di funzione (ovviamente)
     }
 
     // Generalized Cross Validation index
@@ -121,7 +121,7 @@ class SRPDE {
        private:
         SRPDE* model_;
         int n_ = 0, q_ = 0;
-        edf_cache_t edf_cache_;
+        thread_local edf_cache_t edf_cache_;
         // stochastic edf approximation parameter
         int r_, seed_;
     };

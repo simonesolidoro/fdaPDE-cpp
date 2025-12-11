@@ -160,7 +160,26 @@ struct fe_ls_elliptic {
     void resize_b(){//metodo da chiamare nei thread che non inizializzano SRPDE per avere giusta size di b_
         b_.resize(2 * n_dofs_, 1);
     }
-    
+    void change_w(){
+        W_changed_ = true; //costruzione chiama analize_data che chiama update_response_and_weights(const vector_t& y, const WeightMatrix& W) ch echiama update_weights(const WeightMatrix& W) che setta W_change_ a true
+    }
+    void modifiche_b_in_update_update_weights(){
+        if (n_covs_ == 0) {
+            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
+        } else {
+            // XtWX_ = X_.transpose() * W_ * X_;
+            // invXtWX_ = XtWX_.partialPivLu();
+            // invXtWXXtW_ = invXtWX_.solve(X_.transpose() * W_);   // (X^\top * W * X)^{-1} * (X^\top * W)
+            // // woodbury decomposition matrices
+            // U_.block(0, 0, n_dofs_, n_covs_) = PsiNA().transpose() * D_ * W_ * X_;
+            // V_.block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_ * PsiNA();
+            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, y_);
+        }
+        // enforce dirichlet bc, if any
+        for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
+            b_.row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+        }
+    }
     // non-parametric fit
     // \sum_i w_i * (y_i - f(p_i))^2 + \int_D (Lf - u)^2
     template <typename DataLocs, typename WeightMatrix>
@@ -238,6 +257,7 @@ struct fe_ls_elliptic {
 
     // modifiers
     void update_response(const vector_t& y) {
+        std::cout<<"chiamato update_response(const vector_t& y)"<<std::endl; 
         fdapde_assert(Psi_.rows() > 0 && y.rows() == n_locs_ && y.cols() == 1);
         y_ = y;
         // correct \Psi for missing observations
@@ -257,6 +277,7 @@ struct fe_ls_elliptic {
         return;
     }
     template <typename WeightMatrix> void update_weights(const WeightMatrix& W) {
+        std::cout<<"chiamato update_weights(const WeightMatrix& W)"<<std::endl;
         fdapde_assert(Psi_.rows() > 0 && W.rows() == n_locs_ && W.rows() == W.cols());
         W_ = W;
 	W_ /= n_obs_;
@@ -279,6 +300,7 @@ struct fe_ls_elliptic {
         return;
     }
     template <typename WeightMatrix> void update_response_and_weights(const vector_t& y, const WeightMatrix& W) {
+        std::cout<<"chiamato update_response_and_weights(const vector_t& y, const WeightMatrix& W)"<<std::endl;
         fdapde_assert(
           Psi_.rows() > 0 && y.rows() == n_locs_ && y.cols() == 1 && W.rows() == W.cols() && W.rows() == n_locs_);
         y_ = y;
@@ -295,8 +317,10 @@ struct fe_ls_elliptic {
 
     // main fit entry point
     std::pair<vector_t, vector_t> fit(double lambda) {
+        std::cerr<<"fit da thread: "<<std::this_thread::get_id()<<"con W_change: "<<W_changed_<<"e lambda_value"<<lambda_saved_.value()<<std::endl;
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
         if (lambda_saved_.value() != lambda || W_changed_) {
+            std::cerr<<"primo if fit da thread: "<<std::this_thread::get_id()<<std::endl;
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA().transpose() * D_ * W_ * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
@@ -305,6 +329,7 @@ struct fe_ls_elliptic {
 	    W_changed_ = false;
         }
         if (lambda_saved_.value() != lambda) {
+            std::cerr<<"secondo if fit da thread: "<<std::this_thread::get_id()<<std::endl;
             // update linear system rhs
             b_.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
             for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_.row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
@@ -312,9 +337,11 @@ struct fe_ls_elliptic {
         lambda_saved_ = lambda;
         vector_t x;
         if (n_covs_ == 0) {
+            std::cerr<<" if ncov ==0 fit da thread: "<<std::this_thread::get_id()<<std::endl;
             x = invA_.solve(b_);
             f_ = x.topRows(n_dofs_);
         } else {
+            std::cerr<<" else n_cov ==0 fit da thread: "<<std::this_thread::get_id()<<std::endl;
             x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_); //tutte const in input 
             f_ = x.topRows(n_dofs_);
             beta_ = invXtWXXtW_ * (y_ - Psi_ * f_);

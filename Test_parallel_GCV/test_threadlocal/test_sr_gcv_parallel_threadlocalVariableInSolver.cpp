@@ -4,6 +4,7 @@ using namespace fdapde;
 int main(int argc, char** argv){
     int granularity = std::stoi(argv[1]);
     int n_worker = std::stoi(argv[2]);
+    int size_grid = std::stoi(argv[3]);
     // geometry
     std::string mesh_path = "../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
@@ -21,18 +22,21 @@ int main(int argc, char** argv){
     // modeling
     SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));
     // calibration
-    std::vector<double> lambda_grid(13);
-    for (int i = 0; i < 13; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.25 * i) / data[0].rows(); }
+    std::vector<double> lambda_grid(size_grid);
+    for (int i = 0; i < size_grid; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.25 * i) / data[0].rows(); }
     GridSearch<1> optimizer;
     //creo theradpool
     threadpool Tp(1000,n_worker);
-    // auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
-    //     thread_local SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));//credo che la costruisce ogni thread la prima volta e poi ignorato se già costruito. Si messo cout in costruttore con id thread e ogni thread lo costruisce una volta sola. è orribile e sicuramente non corretto ma sembra funzionare
-    //     return m.gcv(100, 476813).operator()(lambda);};
-    Tp.parallel_for(0,n_worker,[&](int i){m.resize_b();});
+    auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
+        thread_local auto m_local = m.gcv(100, 476813);
+        return m_local.operator()(lambda);};
+    
+    Tp.parallel_for(0,n_worker,[&](int i){
+        std::cout<<"resize b in thread:"<<std::this_thread::get_id()<<std::endl;
+        m.resize_b();});
     auto start = std::chrono::high_resolution_clock::now();
     //optimizer.optimize(obj, lambda_grid, execution::par,Tp,granularity);
-    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,Tp,granularity);
+    optimizer.optimize(obj, lambda_grid, execution::par,Tp,granularity);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
     std::cout<<duration.count()<<" ";

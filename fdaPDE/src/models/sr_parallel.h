@@ -95,7 +95,7 @@ class SRPDE {
             r_(100),
             seed_(random_seed) { }
         gcv_t(SRPDE* model, const edf_cache_t& edf_cache, int r, int seed) :
-            model_(model), n_(model->n_obs()), q_(model->n_covs()), edf_cache_(edf_cache), r_(r), seed_(seed),id_(std::this_thread::get_id()) {std::cout<<"creo gcv da thread: "<<std::this_thread::get_id()<<std::endl; }
+            model_(model), n_(model->n_obs()), q_(model->n_covs()), edf_cache_(edf_cache), r_(r), seed_(seed),id_(std::this_thread::get_id()) {}//{std::cout<<"creo gcv da thread: "<<std::this_thread::get_id()<<std::endl; }
         gcv_t(SRPDE* model) : gcv_t(model, edf_cache_t()) { }
         gcv_t(SRPDE* model, int r, int seed) : gcv_t(model, edf_cache_t(), r, seed) { }
 
@@ -107,7 +107,7 @@ class SRPDE {
         template <typename... LambdaT>
             requires(std::is_convertible_v<LambdaT, double> && ...) && (sizeof...(LambdaT) == StaticInputSize)
         constexpr double operator()(LambdaT... lambda) {
-            std::cout<<"thread id: "<<std::this_thread::get_id()<<" esegue il fit da gcv id:"<<id_<<std::endl;
+            //std::cout<<"thread id: "<<std::this_thread::get_id()<<" esegue il fit da gcv id:"<<id_<<std::endl;
             model_->fit(static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
             if (edf_cache_.find(lambda_vec) == edf_cache_.end()) {   // cache Tr[S]
@@ -125,12 +125,12 @@ class SRPDE {
         edf_cache_t edf_cache_;
         // stochastic edf approximation parameter
         int r_, seed_;
-        std::thread::id id_;
+        std::thread::id id_; // per debug momentaneo, inizializzato solo in costruttore usato in test. poi togli e toglie da costruttore
     };
     gcv_t gcv() { return gcv_t(this); }
     gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache) { return gcv_t(this, edf_cache); }
     gcv_t gcv(int r, int seed) { 
-        std::cout<<"threadid: "<<std::this_thread::get_id()<<" chaìiama .gcv(r,seed)"<<std::endl;
+        //std::cout<<"threadid: "<<std::this_thread::get_id()<<" chaìiama .gcv(r,seed)"<<std::endl;
         return gcv_t(this, r, seed); }
     gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
 

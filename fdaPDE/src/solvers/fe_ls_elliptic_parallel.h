@@ -315,7 +315,7 @@ struct fe_ls_elliptic {
             x = invA_.solve(b_);
             f_ = x.topRows(n_dofs_);
         } else {
-            x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_);
+            x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_); //tutte const in input 
             f_ = x.topRows(n_dofs_);
             beta_ = invXtWXXtW_ * (y_ - Psi_ * f_);
         }

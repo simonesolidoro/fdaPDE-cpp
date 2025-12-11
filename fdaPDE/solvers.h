@@ -34,8 +34,8 @@ struct de_solver { };
 }   // namespace fdapde
 
 // least square solvers
-//#include "src/solvers/fe_ls_elliptic.h"
-#include "src/solvers/fe_ls_elliptic_parallel.h"
+#include "src/solvers/fe_ls_elliptic.h"
+//#include "src/solvers/fe_ls_elliptic_parallel.h"
 #include "src/solvers/fe_ls_separable.h"
 #include "src/solvers/fe_ls_parabolic.h"
 

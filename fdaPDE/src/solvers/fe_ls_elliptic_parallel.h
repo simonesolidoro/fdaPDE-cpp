@@ -464,7 +464,7 @@ struct fe_ls_elliptic {
     inline static thread_local sparse_solver_t invA_;
     inline static thread_local matrix_t b_;
     // matrices for Hutchinson stochastic estimation of Tr[S]
-    std::optional<matrix_t> Ys_, Bs_, Us_;
+    inline static thread_local std::optional<matrix_t> Ys_, Bs_, Us_;
   
     int n_dofs_ = 0, n_locs_ = 0, n_obs_ = 0, n_covs_ = 0;
     sparse_matrix_t R0_;    // n_dofs x n_dofs matrix [R0]_{ij} = \int_D \psi_i * \psi_j

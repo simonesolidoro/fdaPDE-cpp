@@ -92,9 +92,9 @@ int main(int argc, char** argv){
         }
         
         threadpool Tp(1000,n_worker);
-        std::mutex m;
+        std::mutex m_;
         auto obj = [&](Eigen::Matrix<double, 2, 1> lambda){
-            std::unique_lock<std::mutex> loc(m);
+            std::unique_lock<std::mutex> loc(m_);
             thread_local SRPDE m("y ~ f", data, fe_ls_separable_mono(std::pair {a_D, F_D}, std::pair {a_T, F_T}));
             loc.unlock();
             return m.gcv(100, 476813).operator()(lambda);

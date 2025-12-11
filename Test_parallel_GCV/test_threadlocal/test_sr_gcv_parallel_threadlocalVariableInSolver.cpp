@@ -27,13 +27,18 @@ int main(int argc, char** argv){
     GridSearch<1> optimizer;
     //creo theradpool
     threadpool Tp(1000,n_worker);
+    thread_local bool resize_b=false; 
     auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
+        if(!resize_b){
+           m.resize_b();
+           resize_b = true; 
+        }
         thread_local auto m_local = m.gcv(100, 476813);
         return m_local.operator()(lambda);};
     
-    Tp.parallel_for(0,n_worker,[&](int i){
-        std::cout<<"resize b in thread:"<<std::this_thread::get_id()<<std::endl;
-        m.resize_b();});
+    // Tp.parallel_for(0,n_worker,[&](int i){
+    //     std::cout<<"resize b in thread:"<<std::this_thread::get_id()<<std::endl;
+    //     m.resize_b();});
     auto start = std::chrono::high_resolution_clock::now();
     //optimizer.optimize(obj, lambda_grid, execution::par,Tp,granularity);
     optimizer.optimize(obj, lambda_grid, execution::par,Tp,granularity);

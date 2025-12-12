@@ -314,10 +314,8 @@ struct fe_ls_elliptic {
 
     // main fit entry point
     std::pair<vector_t, vector_t> fit(double lambda) {
-        std::cerr<<"fit da thread: "<<std::this_thread::get_id()<<"con W_change: "<<W_changed_<<"e lambda_value"<<lambda_saved_.value()<<std::endl;
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
         if (lambda_saved_.value() != lambda || W_changed_) {
-            std::cerr<<"primo if fit da thread: "<<std::this_thread::get_id()<<std::endl;
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA().transpose() * D_ * W_ * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);

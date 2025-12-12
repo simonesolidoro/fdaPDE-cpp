@@ -257,7 +257,6 @@ struct fe_ls_elliptic {
 
     // modifiers
     void update_response(const vector_t& y) {
-        std::cout<<"chiamato update_response(const vector_t& y)"<<std::endl; 
         fdapde_assert(Psi_.rows() > 0 && y.rows() == n_locs_ && y.cols() == 1);
         y_ = y;
         // correct \Psi for missing observations
@@ -277,7 +276,6 @@ struct fe_ls_elliptic {
         return;
     }
     template <typename WeightMatrix> void update_weights(const WeightMatrix& W) {
-        std::cout<<"chiamato update_weights(const WeightMatrix& W)"<<std::endl;
         fdapde_assert(Psi_.rows() > 0 && W.rows() == n_locs_ && W.rows() == W.cols());
         W_ = W;
 	W_ /= n_obs_;
@@ -300,7 +298,6 @@ struct fe_ls_elliptic {
         return;
     }
     template <typename WeightMatrix> void update_response_and_weights(const vector_t& y, const WeightMatrix& W) {
-        std::cout<<"chiamato update_response_and_weights(const vector_t& y, const WeightMatrix& W)"<<std::endl;
         fdapde_assert(
           Psi_.rows() > 0 && y.rows() == n_locs_ && y.cols() == 1 && W.rows() == W.cols() && W.rows() == n_locs_);
         y_ = y;
@@ -329,7 +326,6 @@ struct fe_ls_elliptic {
 	    W_changed_ = false;
         }
         if (lambda_saved_.value() != lambda) {
-            std::cerr<<"secondo if fit da thread: "<<std::this_thread::get_id()<<std::endl;
             // update linear system rhs
             b_.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
             for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_.row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
@@ -337,11 +333,9 @@ struct fe_ls_elliptic {
         lambda_saved_ = lambda;
         vector_t x;
         if (n_covs_ == 0) {
-            std::cerr<<" if ncov ==0 fit da thread: "<<std::this_thread::get_id()<<std::endl;
             x = invA_.solve(b_);
             f_ = x.topRows(n_dofs_);
         } else {
-            std::cerr<<" else n_cov ==0 fit da thread: "<<std::this_thread::get_id()<<std::endl;
             x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_); //tutte const in input 
             f_ = x.topRows(n_dofs_);
             beta_ = invXtWXXtW_ * (y_ - Psi_ * f_);

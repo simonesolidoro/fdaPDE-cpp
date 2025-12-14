@@ -134,9 +134,8 @@ class SRPDE {
         return gcv_t(this, r, seed); }
     gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
 
-    void resize_b(){solver_.resize_b();}
-    void change_w(){solver_.change_w();}
-    void modifiche_b_in_update_update_weights(){solver_.modifiche_b_in_update_update_weights();}
+    void initialize_thread_local_variable(){solver_.initialize_thread_local_variable();}
+
     // inference
     class wald_t {
         using matrix_t = Eigen::Matrix<double, Dynamic, Dynamic>;

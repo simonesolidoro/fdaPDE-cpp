@@ -26,17 +26,15 @@ int main(int argc, char** argv){
     // std::this_thread::sleep_for(std::chrono::microseconds(100));
     // calibration
     std::vector<double> lambda_grid(size_grid);
-    for (int i = 0; i < size_grid; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.25 * i) / data[0].rows(); }
+    for (int i = 0; i < size_grid; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.05 * i) / data[0].rows(); }
     GridSearch<1> optimizer;
     //creo theradpool
     threadpool Tp(1000,n_worker);
-    thread_local bool resize_b=false; 
+    thread_local bool init_thread_local=false; 
     auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
-        if(!resize_b){// poi tutto queste da mettere in unica funzione completa_inizializzazione_threadlocal che vengono fatte durante la costruzione ma solo per quelle fìdel main thread
-           m.resize_b();
-           m.modifiche_b_in_update_update_weights();
-           m.change_w();
-           resize_b = true; 
+        if(!init_thread_local){// poi tutto queste da mettere in unica funzione completa_inizializzazione_threadlocal che vengono fatte durante la costruzione ma solo per quelle fìdel main thread
+           m.initialize_thread_local_variable();
+           init_thread_local = true; 
         }
         thread_local auto m_local = m.gcv(100, 476813);
         // m.fit(std::pow(10, -6.0)/ data[0].rows());

@@ -157,13 +157,9 @@ struct fe_ls_elliptic {
         return;
     }
 
-    void resize_b(){//metodo da chiamare nei thread che non inizializzano SRPDE per avere giusta size di b_
+    void initialize_thread_local_variable(){//metodo da chiamare nei thread che non inizializzano SRPDE per avere giusta size di b_
         b_.resize(2 * n_dofs_, 1);
-    }
-    void change_w(){
         W_changed_ = true; //costruzione chiama analize_data che chiama update_response_and_weights(const vector_t& y, const WeightMatrix& W) ch echiama update_weights(const WeightMatrix& W) che setta W_change_ a true
-    }
-    void modifiche_b_in_update_update_weights(){
         if (n_covs_ == 0) {
             b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
         } else {

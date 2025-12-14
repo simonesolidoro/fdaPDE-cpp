@@ -23,6 +23,7 @@ namespace fdapde {
 namespace internals {
 
 // solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i)) \|_2^2 + \int_D (Lf - u)^2, L elliptic operator
+template<int worker_id = 0>// per ora template parametro
 struct fe_ls_elliptic {
    private:
     using vector_t = Eigen::Matrix<double, Dynamic, 1>;
@@ -149,7 +150,9 @@ struct fe_ls_elliptic {
         areal_eval_ = [fe_space = bilinear_form.trial_space()](const binary_t& locs) -> decltype(auto) {
             return internals::areal_basis_eval(fe_space, locs);
         };
-	b_.resize(2 * n_dofs_, 1); //!!!! questo resize viene fatto solo nel b_ del main thread. devo farlo in tutti
+    for(int i = 0; i<n_worker; i++){
+    	b_[i].resize(2 * n_dofs_, 1); 
+    }
 	// store Dirichlet boundary condition
 	auto& dof_handler = bilinear_form.trial_space().dof_handler();
 	dirichlet_dofs_ = dof_handler.dirichlet_dofs();
@@ -157,25 +160,6 @@ struct fe_ls_elliptic {
         return;
     }
 
-    void initialize_thread_local_variable(){//metodo da chiamare nei thread che non inizializzano SRPDE per avere giusta size di b_
-        b_.resize(2 * n_dofs_, 1);
-        W_changed_ = true; //costruzione chiama analize_data che chiama update_response_and_weights(const vector_t& y, const WeightMatrix& W) ch echiama update_weights(const WeightMatrix& W) che setta W_change_ a true
-        if (n_covs_ == 0) {
-            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
-        } else {
-            // XtWX_ = X_.transpose() * W_ * X_;
-            // invXtWX_ = XtWX_.partialPivLu();
-            // invXtWXXtW_ = invXtWX_.solve(X_.transpose() * W_);   // (X^\top * W * X)^{-1} * (X^\top * W)
-            // // woodbury decomposition matrices
-            // U_.block(0, 0, n_dofs_, n_covs_) = PsiNA().transpose() * D_ * W_ * X_;
-            // V_.block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_ * PsiNA();
-            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, y_);
-        }
-        // enforce dirichlet bc, if any
-        for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
-            b_.row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
-        }
-    }
     // non-parametric fit
     // \sum_i w_i * (y_i - f(p_i))^2 + \int_D (Lf - u)^2
     template <typename DataLocs, typename WeightMatrix>
@@ -230,7 +214,11 @@ struct fe_ls_elliptic {
         y_.resize(n_locs_, y_data.blk_sz());
         y_data.assign_to(y_);
 
-        if (b_.cols() != y_.cols()) { b_.resize(2 * n_dofs_, y_.cols()); }
+        if (b_[0].cols() != y_.cols()) {//idea: verifiche su b_[0] e poi aggiornamenti eventual su tutti i b_[i], questo perché tutti i b_[i] devono essere sempre uguali a b_ 
+            for(int i = 0; i<n_worker; i++){
+                b_[i].resize(2 * n_dofs_, y_.cols());
+            } 
+        }
         if (n_covs_ != 0) {
             if (require_woodbury_realloc) { U_ = matrix_t::Zero(2 * n_dofs_, n_covs_); }
             if (require_woodbury_realloc) { V_ = matrix_t::Zero(n_covs_, 2 * n_dofs_); }
@@ -264,10 +252,14 @@ struct fe_ls_elliptic {
             y_ = (~nan_pattern).select(y_, 0);
         }
         if (old_n_obs != n_obs_) { W_ *= (double)old_n_obs / n_obs_; }
-        b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
+        for (int i = 0; i<n_worker; i++){
+            b_[i].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
+        }
 	// enforce dirichlet bc, if any
         for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
-            b_.row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+            for (int j = 0; j<n_worker; j++){
+                b_[j].row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+            }
         }
         return;
     }
@@ -276,7 +268,9 @@ struct fe_ls_elliptic {
         W_ = W;
 	W_ /= n_obs_;
         if (n_covs_ == 0) {
-            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
+            for (int i = 0; i<n_worker; i++){
+                b_[i].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_ * y_;
+            }
         } else {
             XtWX_ = X_.transpose() * W_ * X_;
             invXtWX_ = XtWX_.partialPivLu();
@@ -284,13 +278,19 @@ struct fe_ls_elliptic {
             // woodbury decomposition matrices
             U_.block(0, 0, n_dofs_, n_covs_) = PsiNA().transpose() * D_ * W_ * X_;
             V_.block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_ * PsiNA();
-            b_.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, y_);
+            for (int i = 0; i<n_worker; i++){
+                b_[i].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, y_);
+            }
         }
         // enforce dirichlet bc, if any
         for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
-            b_.row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+            for (int j = 0; j<n_worker; j++){
+                b_[j].row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+            }
         }
-        W_changed_ = true;
+        for (int i = 0; i<n_worker; i++){
+            W_changed_[i] = true;
+        }
         return;
     }
     template <typename WeightMatrix> void update_response_and_weights(const vector_t& y, const WeightMatrix& W) {
@@ -309,57 +309,57 @@ struct fe_ls_elliptic {
     }
 
     // main fit entry point
-    std::pair<vector_t, vector_t> fit(double lambda) {
+    std::pair<vector_t, vector_t> fit(double lambda, int worker_id = 0) {
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
-        if (lambda_saved_.value() != lambda || W_changed_) {
+        if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA().transpose() * D_ * W_ * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
-            invA_.compute(A);
-	    W_changed_ = false;
+            invA_[worker_id].compute(A);
+	    W_changed_[worker_id] = false;
         }
-        if (lambda_saved_.value() != lambda) {
+        if (lambda_saved_[worker_id].value() != lambda) {
             // update linear system rhs
-            b_.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
-            for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_.row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
+            b_[worker_id].block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
+            for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_[worker_id].row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
         }
-        lambda_saved_ = lambda;
+        lambda_saved_[worker_id] = lambda;
         vector_t x;
         if (n_covs_ == 0) {
-            x = invA_.solve(b_);
-            f_ = x.topRows(n_dofs_);
+            x = invA_[worker_id].solve(b_[worker_id]);
+            f_[worker_id] = x.topRows(n_dofs_);
         } else {
-            x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_); //tutte const in input 
-            f_ = x.topRows(n_dofs_);
-            beta_ = invXtWXXtW_ * (y_ - Psi_ * f_);
+            x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_[worker_id]); //tutte const in input 
+            f_[worker_id] = x.topRows(n_dofs_);
+            beta_[worker_id] = invXtWXXtW_ * (y_ - Psi_ * f_[worker_id]);
         }
-        g_ = x.bottomRows(n_dofs_);
-        return std::make_pair(f_, beta_);
+        g_[worker_id] = x.bottomRows(n_dofs_);
+        return std::make_pair(f_[worker_id], beta_[worker_id]);
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT>)
-    std::pair<vector_t, vector_t> fit(LambdaT&& lambda) {
+    std::pair<vector_t, vector_t> fit(LambdaT&& lambda, int worker_id = 0) {
         fdapde_assert(lambda.size() == n_lambda);
-        return fit(lambda[0]);
+        return fit(lambda[0], worker_id);
     }
     // perform a nonparametric_fit, e.g. discarding possible covariates
-    vector_t nonparametric_fit(double lambda) {
+    vector_t nonparametric_fit(double lambda, int worker_id = 0) {
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
-        if (lambda_saved_.value() != lambda) {
+        if (lambda_saved_[worker_id].value() != lambda) {
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA().transpose() * D_ * W_ * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
-            invA_.compute(A);
+            invA_[worker_id].compute(A);
         }
         vector_t x;
         if (n_covs_ == 0) {   // equivalent to calling fit(lambda)
-            if (lambda_saved_.value() != lambda) {
-                b_.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
-                for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_.row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
+            if (lambda_saved_[worker_id].value() != lambda) {
+                b_[worker_id].block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
+                for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_[worker_id].row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
             }
-            x = invA_.solve(b_);
+            x = invA_[worker_id].solve(b_);
         } else {
             vector_t b(2 * n_dofs_);
             // assemble nonparametric linear system rhs
@@ -367,48 +367,48 @@ struct fe_ls_elliptic {
             b.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
 	    // enforce Dirichlet BCs, if any
             for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
-                b_.row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
-                b_.row(n_dofs_ + dirichlet_dofs_[i]).setZero();
+                b_[worker_id].row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+                b_[worker_id].row(n_dofs_ + dirichlet_dofs_[i]).setZero();
             }
-            x = invA_.solve(b);
+            x = invA_[worker_id].solve(b);
         }
-        lambda_saved_ = lambda;
-        f_ = x.topRows(n_dofs_);
-        g_ = x.bottomRows(n_dofs_);
-        return f_;
+        lambda_saved_[worker_id] = lambda;
+        f_[worker_id] = x.topRows(n_dofs_);
+        g_[worker_id] = x.bottomRows(n_dofs_);
+        return f_[worker_id];
     }
 
     // hutchinson approximation for Tr[S]
-    double edf(int r = 100, int seed = random_seed) {
-        fdapde_assert(lambda_saved_.has_value());
-        if (!Ys_.has_value() || !Bs_.has_value()) {
+    double edf(int r = 100, int seed = random_seed, int worker_id = 0) {
+        fdapde_assert(lambda_saved_[worker_id].has_value());
+        if (!Ys_[worker_id].has_value() || !Bs_[worker_id].has_value()) {
             int seed_ = (seed == random_seed) ? std::random_device()() : seed;
             std::mt19937 rng(seed_);
             rademacher_distribution rademacher;
-            Us_ = matrix_t(n_locs_, r);
+            Us_[worker_id] = matrix_t(n_locs_, r);
             for (int i = 0; i < n_locs_; ++i) {
-                for (int j = 0; j < r; ++j) { Us_->operator()(i, j) = rademacher(rng); }
+                for (int j = 0; j < r; ++j) { Us_[worker_id]->operator()(i, j) = rademacher(rng); }
             }
-            Ys_ = Us_->transpose() * Psi_;
-            Bs_ = matrix_t::Zero(2 * n_dofs_, r);   // implicitly enforce homogeneous forcing
+            Ys_[worker_id] = Us_[worker_id]->transpose() * Psi_;
+            Bs_[worker_id] = matrix_t::Zero(2 * n_dofs_, r);   // implicitly enforce homogeneous forcing
         }
         if (n_covs_ == 0) {
-            Bs_->topRows(n_dofs_) = -PsiNA().transpose() * D_ * W_ * (*Us_);
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA().transpose() * D_ * W_ * (*Us_[worker_id]);
         } else {
-            Bs_->topRows(n_dofs_) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, *Us_);
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA().transpose() * D_ * internals::lmbQ(W_, X_, invXtWX_, *Us_[worker_id]);
         }
 	// enforce Dirichlet BCs, if any
         for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
-            Bs_->row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
+            Bs_[worker_id]->row(dirichlet_dofs_[i]).setConstant(dirichlet_vals_[i]);
         }
-        matrix_t x = n_covs_ == 0 ? invA_.solve(*Bs_) : woodbury_system_solve(invA_, U_, XtWX_, V_, *Bs_);
+        matrix_t x = n_covs_ == 0 ? invA_[worker_id].solve(*Bs_[worker_id]) : woodbury_system_solve(invA_[worker_id], U_, XtWX_, V_, *Bs_[worker_id]);
         double trS = 0;   // monte carlo Tr[S] approximation
-        for (int i = 0; i < r; ++i) { trS += Ys_->row(i).dot(x.col(i).head(n_dofs_)); }
+        for (int i = 0; i < r; ++i) { trS += Ys_[worker_id]->row(i).dot(x.col(i).head(n_dofs_)); }
         return trS / r;
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT> || std::is_floating_point_v<LambdaT>)
-    double edf(const LambdaT& lambda, int r = 100, int seed = random_seed) {
+    double edf(const LambdaT& lambda, int r = 100, int seed = random_seed, int worker_id = 0) {
         double lambda_;
         if constexpr (internals::is_vector_like_v<LambdaT>) {
             fdapde_assert(lambda.size() == n_lambda && lambda[0] > 0);
@@ -417,14 +417,14 @@ struct fe_ls_elliptic {
             fdapde_assert(lambda > 0);
             lambda_ = lambda;
         }
-        if (lambda_saved_.value() != lambda_) {
+        if (lambda_saved_[worker_id].value() != lambda_) {
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA().transpose() * D_ * W_ * PsiNA(), lambda_ * R1_.transpose(), lambda_ * R1_, lambda_ * R0_);
 	    enforce_lhs_dirichlet_bc_(A);	    
-            invA_.compute(A);
-            lambda_saved_ = lambda_;
+            invA_[worker_id].compute(A);
+            lambda_saved_[worker_id] = lambda_;
         }
-        return edf(r, seed);
+        return edf(r, seed, worker_id);
     }
     // penalty matrix: \lambda * R1^\top * (R0)^{-1} * R1
     matrix_t P(double lambda) const {
@@ -442,19 +442,19 @@ struct fe_ls_elliptic {
         return lambda * R1_.transpose() * invR0.solve(R1_);
     }
     // efficient evaluation of f^\top * P * f = g^\top * R0 * g
-    double ftPf(double lambda) {
-        if (lambda_saved_.value() != lambda || W_changed_) { fit(lambda); }
-        return lambda * g_.dot(R0_ * g_);
+    double ftPf(double lambda, int worker_id = 0) {
+        if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) { fit(lambda,worker_id); }
+        return lambda * g_[worker_id].dot(R0_ * g_[worker_id]);
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT>)
-    double ftPf(const LambdaT& lambda) {
+    double ftPf(const LambdaT& lambda, int worker_id = 0) {
         fdapde_assert(lambda.size() == n_lambda);
-        return ftPf(lambda[0]);
+        return ftPf(lambda[0],worker_id);
     }
     // left multiplication by \Psi
     vector_t lmbPsi(const vector_t& rhs) const { return Psi_ * rhs; }
-    vector_t fn() const { return Psi_ * f_; }
+    vector_t fn(int worker_id = 0) const { return Psi_ * f_[worker_id]; }
     matrix_t Q() const { return internals::lmbQ(W_, X_, invXtWX_, matrix_t::Identity(n_locs_, n_locs_)); }
 
     // observers
@@ -464,22 +464,22 @@ struct fe_ls_elliptic {
     const sparse_matrix_t& Psi() const { return Psi_; }
     const sparse_matrix_t& PsiNA() const { return B_.has_value() ? *B_ : Psi_; }
     const vector_t& force() const { return u_; }
-    const vector_t& f() const { return f_; }
-    const vector_t& beta() const { return beta_; }
-    const vector_t& misfit() const { return g_; }
+    const vector_t& f(int worker_id = 0) const { return f_[worker_id]; }
+    const vector_t& beta(int worker_id = 0) const { return beta_[worker_id]; }
+    const vector_t& misfit(int worker_id = 0) const { return g_[worker_id]; }
     const matrix_t& design_matrix() const { return X_; }
     const vector_t& response() const { return y_; }
     const sparse_matrix_t& weights() const { return W_; }
-    double lambda() const { return *lambda_saved_; }
+    double lambda(int worker_id = 0) const { return *lambda_saved_[worker_id]; }
   
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
    protected:
-    inline static thread_local std::optional<double> lambda_saved_ = -1;
-    inline static thread_local sparse_solver_t invA_;
-    inline static thread_local matrix_t b_;
+    std::vector<std::optional<double>> lambda_saved_ (n_worker,-1);
+    std::vector<sparse_solver_t> invA_(n_worker);
+    std::vector<matrix_t> b_(n_worker);
     // matrices for Hutchinson stochastic estimation of Tr[S]
-    inline static thread_local std::optional<matrix_t> Ys_, Bs_, Us_;
+    std::vector<std::optional<matrix_t>> Ys_(n_worker), Bs_(n_worker), Us_(n_worker);
   
     int n_dofs_ = 0, n_locs_ = 0, n_obs_ = 0, n_covs_ = 0;
     sparse_matrix_t R0_;    // n_dofs x n_dofs matrix [R0]_{ij} = \int_D \psi_i * \psi_j
@@ -489,7 +489,7 @@ struct fe_ls_elliptic {
     diag_matrix_t D_;       // vector of regions' measures (areal sampling)
     mutable sparse_solver_t invR0_;
     std::optional<sparse_matrix_t> B_;   // \Psi matrix corrected for missing observations
-    inline static thread_local vector_t f_, beta_, g_;
+    std::vector<vector_t> f_(n_worker), beta_(n_worker), g_(n_worker);
     // basis system evaluation handles
     std::function<sparse_matrix_t(const matrix_t& locs)> point_eval_;
     std::function<std::pair<sparse_matrix_t, vector_t>(const binary_t& locs)> areal_eval_;
@@ -503,7 +503,7 @@ struct fe_ls_elliptic {
     matrix_t XtWX_;            // n_covs x n_covs matrix X^\top * W * X
     dense_solver_t invXtWX_;   // factorization of n_covs x n_covs matrix X^\top * W * X
     matrix_t invXtWXXtW_;      // n_covs x n_obs matrix (X^\top * X)^{-1} * (X^\top W)
-    inline static thread_local bool W_changed_;
+    std::vector<bool> W_changed_(n_worker);
 };
 
 }   // namespace internals

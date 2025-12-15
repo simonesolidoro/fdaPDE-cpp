@@ -20,10 +20,11 @@ int main(int argc, char** argv){
     ZeroField<2> u;
     auto F = integral(D)(u * v);
     // modeling
-    
+    std::cout<<"fin qui ok1"<<std::endl;
     SRPDE<internals::fe_ls_elliptic<1>,1> m("y ~ f", data, fe_ls_elliptic(a, F));
-
-    m.fit(n_worker, std::pow(10, -6.0)/ data[0].rows());
+    std::cout<<"fin qui ok2"<<std::endl;
+    m.fit(0, std::pow(10, -6.0)/ data[0].rows());
+    std::cout<<"fin qui ok3"<<std::endl;
     std::cout<<" f main :"<<m.f()<<std::endl;
     // // std::this_thread::sleep_for(std::chrono::microseconds(100));
     // // calibration

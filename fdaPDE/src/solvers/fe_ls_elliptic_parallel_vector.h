@@ -341,7 +341,7 @@ struct fe_ls_elliptic {
         requires(internals::is_vector_like_v<LambdaT>)
     std::pair<vector_t, vector_t> fit(int worker_id,LambdaT&& lambda) {
         fdapde_assert(lambda.size() == n_lambda);
-        return fit(lambda[0], worker_id);
+        return fit(worker_id, lambda[0]);
     }
     // perform a nonparametric_fit, e.g. discarding possible covariates
     vector_t nonparametric_fit(int worker_id, double lambda) {

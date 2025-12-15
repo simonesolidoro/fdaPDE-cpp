@@ -56,7 +56,7 @@ class SRPDE {
         analyze_data(formula, gf, vector_t::Ones(gf[0].rows()).asDiagonal());
     }
     // fitting
-    template <typename... Args> auto fit(int worker_id = 0, Args&&... args) { return solver_.fit(worker_id, std::forward<Args>(args)...); }
+    template <typename... Args> auto fit(int worker_id, Args&&... args) { return solver_.fit(worker_id, std::forward<Args>(args)...); }
     // observers
     const vector_t& f(int worker_id = 0) const { return solver_.f(worker_id); }
     const vector_t& beta(int worker_id = 0) const { return solver_.beta(worker_id); }

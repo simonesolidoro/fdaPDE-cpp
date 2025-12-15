@@ -101,12 +101,12 @@ class SRPDE {
 
         template <typename InputType_>
             requires(internals::is_subscriptable<InputType_, int>)
-        constexpr double operator()(const InputType_& lambda) {
-            return internals::apply_index_pack<n_lambda>([&]<int... Ns_>() { return operator()(lambda[Ns_]...); });
+        constexpr double operator()(int worker_id, const InputType_& lambda) {
+            return internals::apply_index_pack<n_lambda>([&]<int... Ns_>() { return operator()(worker_id,lambda[Ns_]...); });
         }
         template <typename... LambdaT>
             requires(std::is_convertible_v<LambdaT, double> && ...) && (sizeof...(LambdaT) == StaticInputSize)
-        constexpr double operator()(int worker_id = 0, LambdaT... lambda) {//pessimo default input piu variadic template da dividere
+        constexpr double operator()(int worker_id, LambdaT... lambda) {
             //std::cout<<"thread id: "<<std::this_thread::get_id()<<" esegue il fit da gcv id:"<<id_<<std::endl;
             model_->fit(worker_id,static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};

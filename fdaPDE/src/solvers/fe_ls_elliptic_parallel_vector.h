@@ -23,7 +23,7 @@ namespace fdapde {
 namespace internals {
 
 // solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i)) \|_2^2 + \int_D (Lf - u)^2, L elliptic operator
-template<int worker_id = 0>// per ora template parametro
+template<int n_worker = 1>// per ora template parametro
 struct fe_ls_elliptic {
    private:
     using vector_t = Eigen::Matrix<double, Dynamic, 1>;
@@ -309,7 +309,7 @@ struct fe_ls_elliptic {
     }
 
     // main fit entry point
-    std::pair<vector_t, vector_t> fit(double lambda, int worker_id = 0) {
+    std::pair<vector_t, vector_t> fit(int worker_id, double lambda) {
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part
@@ -330,7 +330,7 @@ struct fe_ls_elliptic {
             x = invA_[worker_id].solve(b_[worker_id]);
             f_[worker_id] = x.topRows(n_dofs_);
         } else {
-            x = woodbury_system_solve(invA_, U_, XtWX_, V_, b_[worker_id]); //tutte const in input 
+            x = woodbury_system_solve(invA_[worker_id], U_, XtWX_, V_, b_[worker_id]); //tutte const in input 
             f_[worker_id] = x.topRows(n_dofs_);
             beta_[worker_id] = invXtWXXtW_ * (y_ - Psi_ * f_[worker_id]);
         }
@@ -339,12 +339,12 @@ struct fe_ls_elliptic {
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT>)
-    std::pair<vector_t, vector_t> fit(LambdaT&& lambda, int worker_id = 0) {
+    std::pair<vector_t, vector_t> fit(int worker_id,LambdaT&& lambda) {
         fdapde_assert(lambda.size() == n_lambda);
         return fit(lambda[0], worker_id);
     }
     // perform a nonparametric_fit, e.g. discarding possible covariates
-    vector_t nonparametric_fit(double lambda, int worker_id = 0) {
+    vector_t nonparametric_fit(int worker_id, double lambda) {
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
         if (lambda_saved_[worker_id].value() != lambda) {
             // assemble and factorize system matrix for nonparameteric part
@@ -359,7 +359,7 @@ struct fe_ls_elliptic {
                 b_[worker_id].block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
                 for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) { b_[worker_id].row(n_dofs_ + dirichlet_dofs_[i]).setZero(); }
             }
-            x = invA_[worker_id].solve(b_);
+            x = invA_[worker_id].solve(b_[worker_id]);
         } else {
             vector_t b(2 * n_dofs_);
             // assemble nonparametric linear system rhs
@@ -475,12 +475,14 @@ struct fe_ls_elliptic {
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
    protected:
-    std::vector<std::optional<double>> lambda_saved_ (n_worker,-1);
-    std::vector<sparse_solver_t> invA_(n_worker);
-    std::vector<matrix_t> b_(n_worker);
+    std::vector<std::optional<double>> lambda_saved_ = std::vector<std::optional<double>>(n_worker, -1.0);
+    std::vector<sparse_solver_t> invA_ = std::vector<sparse_solver_t>(n_worker); 
+    std::vector<matrix_t> b_ = std::vector<matrix_t>(n_worker); 
     // matrices for Hutchinson stochastic estimation of Tr[S]
-    std::vector<std::optional<matrix_t>> Ys_(n_worker), Bs_(n_worker), Us_(n_worker);
-  
+    std::vector<std::optional<matrix_t>> Ys_ = std::vector<std::optional<matrix_t>>(n_worker);
+    std::vector<std::optional<matrix_t>> Bs_ = std::vector<std::optional<matrix_t>>(n_worker);
+    std::vector<std::optional<matrix_t>> Us_ = std::vector<std::optional<matrix_t>>(n_worker);
+
     int n_dofs_ = 0, n_locs_ = 0, n_obs_ = 0, n_covs_ = 0;
     sparse_matrix_t R0_;    // n_dofs x n_dofs matrix [R0]_{ij} = \int_D \psi_i * \psi_j
     sparse_matrix_t R1_;    // n_dofs x n_dofs matrix [R1]_{ij} = \int_D a(\psi_i, \psi_j)
@@ -489,7 +491,9 @@ struct fe_ls_elliptic {
     diag_matrix_t D_;       // vector of regions' measures (areal sampling)
     mutable sparse_solver_t invR0_;
     std::optional<sparse_matrix_t> B_;   // \Psi matrix corrected for missing observations
-    std::vector<vector_t> f_(n_worker), beta_(n_worker), g_(n_worker);
+    std::vector<vector_t> f_ = std::vector<vector_t>(n_worker); 
+    std::vector<vector_t> beta_ = std::vector<vector_t>(n_worker); 
+    std::vector<vector_t> g_ = std::vector<vector_t>(n_worker);
     // basis system evaluation handles
     std::function<sparse_matrix_t(const matrix_t& locs)> point_eval_;
     std::function<std::pair<sparse_matrix_t, vector_t>(const binary_t& locs)> areal_eval_;
@@ -503,14 +507,14 @@ struct fe_ls_elliptic {
     matrix_t XtWX_;            // n_covs x n_covs matrix X^\top * W * X
     dense_solver_t invXtWX_;   // factorization of n_covs x n_covs matrix X^\top * W * X
     matrix_t invXtWXXtW_;      // n_covs x n_obs matrix (X^\top * X)^{-1} * (X^\top W)
-    std::vector<bool> W_changed_(n_worker);
+    std::vector<bool> W_changed_ = std::vector<bool>(n_worker);
 };
 
 }   // namespace internals
 
 // elliptic solver API
-template <typename BilinearForm_, typename LinearForm_> struct fe_ls_elliptic {
-    using solver_t = internals::fe_ls_elliptic;
+template <typename BilinearForm_, typename LinearForm_, int n_worker = 1> struct fe_ls_elliptic {
+    using solver_t = internals::fe_ls_elliptic<n_worker>;
    private:
     struct penalty_packet {
         using BilinearForm = std::decay_t<BilinearForm_>;

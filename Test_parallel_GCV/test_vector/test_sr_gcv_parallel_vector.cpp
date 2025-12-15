@@ -2,9 +2,9 @@
 using namespace fdapde;
 
 int main(int argc, char** argv){
-    int granularity = std::stoi(argv[1]);
-    int n_worker = std::stoi(argv[2]);
-    int size_grid = std::stoi(argv[3]);
+    //int granularity = std::stoi(argv[1]);
+    constexpr int n_worker = 2; //std::stoi(argv[2]);
+    int size_grid = std::stoi(argv[1]);
     // geometry
     std::string mesh_path = "../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
@@ -21,7 +21,7 @@ int main(int argc, char** argv){
     auto F = integral(D)(u * v);
     // modeling
     
-    SRPDE<internals::fe_ls_elliptic<1>,1> m("y ~ f", data, fe_ls_elliptic(a, F));
+    SRPDE<internals::fe_ls_elliptic<n_worker>,n_worker> m("y ~ f", data, fe_ls_elliptic(a, F));
     
     //m.fit(0, std::pow(10, -6.0)/ data[0].rows());
     // std::cout<<" f main :"<<m.f()<<std::endl;
@@ -30,8 +30,8 @@ int main(int argc, char** argv){
     std::vector<double> lambda_grid(size_grid);
     for (int i = 0; i < size_grid; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.05 * i) / data[0].rows(); }
     GridSearch<1> optimizer;
-    // //creo theradpool
-    // threadpool Tp(1000,n_worker);
+    //creo theradpool
+    threadpool Tp(1000,n_worker);
     // thread_local bool init_thread_local=false; 
     // auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
     //     if(!init_thread_local){// poi tutto queste da mettere in unica funzione completa_inizializzazione_threadlocal che vengono fatte durante la costruzione ma solo per quelle fìdel main thread
@@ -52,9 +52,9 @@ int main(int argc, char** argv){
     // std::cout<<duration.count()<<" ";
     auto gcv = m.gcv(100, 476813);
     auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
-        return gcv.operator()(0,lambda); // 0 è worker_id 
+        return gcv.operator()(Tp.index_worker(),lambda); // 0 è worker_id 
     };
-    optimizer.optimize(obj, lambda_grid);
+    optimizer.optimize(obj, lambda_grid, execution::par,Tp,-1);
     
 
     std::cout<<"ottimo"<<optimizer.optimum()<<"value:"<<optimizer.value();

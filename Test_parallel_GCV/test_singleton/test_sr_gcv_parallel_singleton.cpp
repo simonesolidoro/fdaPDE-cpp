@@ -11,7 +11,7 @@ int main(int argc, char** argv){
     // data
     GeoFrame data(D);
     auto& l1 = data.insert_scalar_layer<POINT>("l1", MESH_NODES);
-    l1.load_csv<double>("../../test/data/sr/04/response.csv"); //con 60 in test 01
+    l1.load_csv<double>("../../test/data/sr/04/response.csv"); //con 60 in test 01 
     // physics
     FeSpace Vh(D, P1<1>);
     TrialFunction f(Vh);
@@ -20,19 +20,14 @@ int main(int argc, char** argv){
     ZeroField<2> u;
     auto F = integral(D)(u * v);
     // modeling
-    //thread_local SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));
+    SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));
     // calibration
     std::vector<double> lambda_grid(130);
-    for (int i = 0; i < 130; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.25 * i) / data[0].rows(); }
-    GridSearch<1> optimizer;
-    //creo theradpool
-    //threadpool Tp(1000,n_worker);
-    auto obj = [&](Eigen::Matrix<double, 1, 1> lambda){
-        thread_local SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));
-        return m.gcv(100, 476813).operator()(lambda);};
-
+    for (int i = 0; i < 130; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.05 * i) / data[0].rows(); }
+    GridSearch<1> optimizer; 
+    
     auto start = std::chrono::high_resolution_clock::now();
-    optimizer.optimize(obj, lambda_grid, execution::par,granularity);
+    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,granularity);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
     std::cout<<duration.count()<<" ";

@@ -74,6 +74,7 @@ class SRPDE {
         }
         return fitted_;//non serve thread_local fitted_ perché variabile locale di funzione (ovviamente)
     }
+    void prepara_per_parallelo(){ solver_.prepara_per_parallelo();}
 
     // Generalized Cross Validation index
     struct gcv_t : public ScalarFieldBase<n_lambda, gcv_t> {
@@ -107,7 +108,19 @@ class SRPDE {
         template <typename... LambdaT>
             requires(std::is_convertible_v<LambdaT, double> && ...) && (sizeof...(LambdaT) == StaticInputSize)
         constexpr double operator()(LambdaT... lambda) {
-            if(singleton_threadpool::status()){ 
+            if(singleton_threadpool::status()){
+                if(!ready_per_parallelo){
+                    std::lock_guard<std::mutex> lock(m_gcv_);
+                    if(!ready_per_parallelo){
+                        model_->prepara_per_parallelo();
+                        int n_worker = singleton_threadpool::instance().n_workers();
+                        edf_cache_.resize(n_worker);
+                        for (int i = 1; i<n_worker; i++){
+                            edf_cache_[i] = edf_cache_[0];
+                        }
+                    } // lettura di nuovo di flag dentro al mutex così affidabile (dovrei mettere atomic e memory order, per il mommento lascio così poi se c'è tempo ci torno)
+                    ready_per_parallelo = true;
+                } 
                 //esecuzione parallela
                 int worker_id = singleton_threadpool::instance().index_worker();
                 model_->fit(worker_id,static_cast<double>(lambda)...);
@@ -137,6 +150,8 @@ class SRPDE {
         std::vector<edf_cache_t> edf_cache_{1}; //per ora vector, poi meglio globale e accesso sicuro tramite shared-mutex  
         // stochastic edf approximation parameter
         int r_, seed_;
+        bool ready_per_parallelo = false;
+        std::mutex m_gcv_;
     };
     gcv_t gcv() { return gcv_t(this); }
     gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache) { return gcv_t(this, edf_cache); }

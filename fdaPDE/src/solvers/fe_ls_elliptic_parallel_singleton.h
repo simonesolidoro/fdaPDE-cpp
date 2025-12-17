@@ -25,7 +25,7 @@ namespace internals {
 // solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i)) \|_2^2 + \int_D (Lf - u)^2, L elliptic operator
 struct fe_ls_elliptic {
    private:
-   int n_worker = 1;
+    int n_worker = 1;
     using vector_t = Eigen::Matrix<double, Dynamic, 1>;
     using matrix_t = Eigen::Matrix<double, Dynamic, Dynamic>;
     using binary_t = BinaryMatrix<Dynamic, Dynamic>;
@@ -474,6 +474,28 @@ struct fe_ls_elliptic {
   
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
+
+    void prepara_per_parallelo(){// vettori di dati non thread-safe sono dim = 1, questo li rende dimensione = n_worker copiando elemento0
+        n_worker = singleton_threadpool::instance().n_workers();
+        // ridimensiona tutti i container a n_worker
+        lambda_saved_.resize(n_worker);
+        invA_.resize(n_worker);
+        b_.resize(n_worker);
+        Ys_.resize(n_worker);
+        Bs_.resize(n_worker);
+        Us_.resize(n_worker);
+        f_.resize(n_worker);
+        beta_.resize(n_worker);
+        g_.resize(n_worker);
+        W_changed_.resize(n_worker);
+
+        // copia lo stato del worker 0 sugli altri, solo dei dati che sono inizializzati 
+        for (int i = 1; i < n_worker; ++i) {
+            lambda_saved_[i] = lambda_saved_[0];
+            b_[i]            = b_[0];
+            W_changed_[i]    = W_changed_[0];
+        }
+    }
    protected:
     std::vector<std::optional<double>> lambda_saved_ = std::vector<std::optional<double>>(1, -1.0);
     std::vector<sparse_solver_t> invA_ = std::vector<sparse_solver_t>(1); 

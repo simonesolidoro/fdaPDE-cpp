@@ -6,12 +6,12 @@ int main(int argc, char** argv){
     int granularity = std::stoi(argv[1]);
     int n_worker = std::stoi(argv[2]);
     // geometry
-    std::string mesh_path = "../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
+    std::string mesh_path = "../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
     // data
     GeoFrame data(D);
     auto& l1 = data.insert_scalar_layer<POINT>("l1", MESH_NODES);
-    l1.load_csv<double>("../test/data/sr/04/response.csv"); //con 60 in test 01
+    l1.load_csv<double>("../../test/data/sr/04/response.csv"); //con 60 in test 01
     // physics
     FeSpace Vh(D, P1<1>);
     TrialFunction f(Vh);

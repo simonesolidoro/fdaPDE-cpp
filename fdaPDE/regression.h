@@ -24,8 +24,9 @@
 
 #include "src/indexes.h"
 #include "solvers.h"
-#include "src/models/sr_parallel_vector.h"
+//#include "src/models/sr_parallel_vector.h"
 //#include "src/models/sr_parallel.h"
+#include "src/models/sr_parallel_singleton.h"
 //#include "src/models/sr.h"
 #include "src/models/gsr.h"
 #include "src/models/qsr.h"

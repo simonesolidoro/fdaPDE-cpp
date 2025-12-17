@@ -50,7 +50,9 @@ int main(int argc, char** argv){
         std::unique_lock<std::mutex> loc(m_);
         thread_local SRPDE m("y ~ f", data, fe_ls_separable_mono(std::pair {a_D, F_D}, std::pair {a_T, F_T}));    
         loc.unlock();
-        return m.gcv(100, 476813).operator()(lambda);
+        auto ret = m.gcv(100, 476813).operator()(lambda);
+        //std::cout<<"thread "<<std::this_thread::get_id()<<" con lambda: "<<lambda<<" calcolato: "<<ret<<std::endl;
+        return ret;
     };
     GridSearch<2> optimizer;
     auto start = std::chrono::high_resolution_clock::now();

@@ -269,13 +269,11 @@ class fe_ls_separable_mono {
     // fit from formula
     template <typename GeoFrame, typename WeightMatrix>
     void analyze_data(const std::string& formula, const GeoFrame& gf, const WeightMatrix& W) {
-std::cout<<"A1 in thread"<<std::this_thread::get_id()<<std::endl;
         fdapde_static_assert(GeoFrame::Order == 2, THIS_CLASS_IS_FOR_ORDER_TWO_GEOFRAMES_ONLY);
         fdapde_assert(gf.n_layers() == 1);
         n_obs_  = gf[0].rows();
         n_locs_ = n_obs_;
         eval_basis_at_(gf);   // update \Psi matrix
-std::cout<<"A2 in thread"<<std::this_thread::get_id()<<std::endl;
         // parse formula, extract response vector and design matrix
         Formula formula_(formula);
         std::vector<std::string> covs;
@@ -295,9 +293,7 @@ std::cout<<"A2 in thread"<<std::this_thread::get_id()<<std::endl;
             X_.resize(n_locs_, n_covs_);   // assemble design matrix
             for (int i = 0; i < n_covs_; ++i) { gf[0].data().template col<double>(covs[i]).assign_to(X_.col(i)); }
         }
-std::cout<<"A3 in thread"<<std::this_thread::get_id()<<std::endl;
         update_response_and_weights(y_, W);   // updates design_matrix releated matrices as well
-std::cout<<"A4 in thread"<<std::this_thread::get_id()<<std::endl;
         return;
     }
 

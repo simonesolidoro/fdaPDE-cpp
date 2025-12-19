@@ -58,4 +58,4 @@ int main(int argc, char** argv){
 
 // 4 lambda, std::pow(10, -6.0 + 0.25 * i),  (size_grid = 4) sol: tempo=39989362 sol=ottimo 1.15923e-09 1.15923e-09 value:0.027419
 // 16 lambda, std::pow(10, -6.0 + 0.25 * i),  sol: tempo 129077993 ; ottimo1.15923e-06 1.15923e-06; value 0.01326
-// 16 lambda, std::pow(10, -6.0 + 0.05 * i),  sol: tempo 136549418 ; ottimo1.15923e-09 1.15923e-09; value:0.027419
+// 16 lambda, std::pow(10, -6.0 + 0.05 * i),  sol: tempo 136549418 ; ottimo1.15923e-09 1.15923e-09; value:0.027419 

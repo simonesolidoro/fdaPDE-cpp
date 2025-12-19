@@ -35,8 +35,8 @@ int main(int argc, char** argv){
 
     // grid da popolare con la griglia dei valori da esplorare
     for(int i =0; i<lambda_grid.rows();++i){
-        lambda_grid(i,0) = std::pow(10, -6.0 + 0.05 * i) / data[0].rows();  
-        lambda_grid(i,1) = std::pow(10, -6.0 + 0.05 * i) / data[0].rows();  
+        lambda_grid(i,0) = std::pow(10, -6.0 + 0.05 * 640) / data[0].rows();  
+        lambda_grid(i,1) = std::pow(10, -6.0 + 0.05 * 640) / data[0].rows();  
     }
     
     GridSearch<2> optimizer;

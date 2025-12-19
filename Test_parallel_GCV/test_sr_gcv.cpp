@@ -33,7 +33,9 @@ int main(int argc, char** argv){
     // for (auto&  i : optimizer.values()){
     // 	std::cout<<i<<std::endl;
     // }
- 
+    double lambda= std::pow(10, -6.0);
+    m.fit(lambda);
+    std::cout<<m.f()<<std::endl;
     // EXPECT_TRUE(almost_equal<double>(optimizer.values(), "fdaPDE-cpp/test/data/sr/04/gcvs.mtx"));
 }
 

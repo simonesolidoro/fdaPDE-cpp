@@ -35,8 +35,8 @@ int main(int argc, char** argv){
 
     // grid da popolare con la griglia dei valori da esplorare
     for(int i =0; i<lambda_grid.rows();++i){
-        lambda_grid(i,0) = std::pow(10, -6.0 + 0.25 * i) / data[0].rows();  
-        lambda_grid(i,1) = std::pow(10, -6.0 + 0.25 * i) / data[0].rows();  
+        lambda_grid(i,0) = std::pow(10, -6.0 + 0.05 * i) / data[0].rows();  
+        lambda_grid(i,1) = std::pow(10, -6.0 + 0.05 * i) / data[0].rows();  
     }
     
     GridSearch<2> optimizer;
@@ -56,5 +56,6 @@ int main(int argc, char** argv){
     return 0;
 }
 
-// 4 lambda (size_grid = 4) sol: tempo=39989362 sol=ottimo 1.15923e-09 1.15923e-09 value:0.027419
-// 16 lambda sol: tempo 129077993 ; ottimo1.15923e-06 1.15923e-06; value 0.01326
+// 4 lambda, std::pow(10, -6.0 + 0.25 * i),  (size_grid = 4) sol: tempo=39989362 sol=ottimo 1.15923e-09 1.15923e-09 value:0.027419
+// 16 lambda, std::pow(10, -6.0 + 0.25 * i),  sol: tempo 129077993 ; ottimo1.15923e-06 1.15923e-06; value 0.01326
+// 16 lambda, std::pow(10, -6.0 + 0.05 * i),  sol: tempo 136549418 ; ottimo1.15923e-09 1.15923e-09; value:0.027419

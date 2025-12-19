@@ -431,10 +431,10 @@ class fe_ls_separable_mono {
             int seed_ = (seed == random_seed) ? std::random_device()() : seed;
             std::mt19937 rng(seed_);
             rademacher_distribution rademacher;
-            Us_[worker_id]->resize(n_locs_, r);
+            Us_[worker_id] = matrix_t(n_locs_, r); //Us_[worker_id]->resize(n_locs_, r); da segmentation fault in sequenziale 
             for (int i = 0; i < n_locs_; ++i) {
                 for (int j = 0; j < r; ++j) { Us_[worker_id]->operator()(i, j) = rademacher(rng); }
-            }
+            }         
             Ys_[worker_id] = Us_[worker_id]->transpose() * Psi_;
             Bs_[worker_id] = matrix_t::Zero(2 * n_dofs_, r);   // implicitly enforce homogeneous forcing
         }

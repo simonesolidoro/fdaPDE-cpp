@@ -2,9 +2,8 @@
 using namespace fdapde;
 
 int main(int argc, char** argv){
-    if(argc < 2){std::cerr<<"in input: granularity n_worker \n";}
+    if(argc < 2){std::cerr<<"in input: granularity \n";}
     int granularity = std::stoi(argv[1]);
-    int n_worker = std::stoi(argv[2]);
     // geometry
     std::string mesh_path = "../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);

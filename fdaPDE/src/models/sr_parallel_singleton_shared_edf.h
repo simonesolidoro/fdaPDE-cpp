@@ -125,9 +125,13 @@ class SRPDE {
                 {   
                     std::unique_lock<std::mutex> loc_edf(m_gcv_);
                     if (edf_cache_.find(lambda_vec) == edf_cache_.end()) {   // cache Tr[S]
-                        edf_cache_[lambda_vec] = model_->edf(r_, seed_, worker_id);
+                        loc_edf.unlock();
+                        edf_tmp = model_->edf(r_, seed_, worker_id);
+                        loc_edf.lock();
+                        edf_cache_[lambda_vec] = edf_tmp;
+                    }else{
+                        edf_tmp = edf_cache_.at(lambda_vec);
                     }
-                    edf_tmp = edf_cache_.at(lambda_vec);
                 }
                 double dor = n_ - (q_ + edf_tmp);   // residual degrees of freedom
                 return (n_ / std::pow(dor, 2)) * (model_->fitted(worker_id) - model_->response()).squaredNorm();

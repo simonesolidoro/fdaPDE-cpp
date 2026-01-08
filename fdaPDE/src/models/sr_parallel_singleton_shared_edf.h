@@ -146,8 +146,8 @@ class SRPDE {
             }
         }
         // observers
-        const edf_cache_t& edf_cache(int worker_id = 0) const { return edf_cache_[worker_id]; }
-        edf_cache_t& edf_cache(int worker_id = 0) { return edf_cache_[worker_id]; }
+        const edf_cache_t& edf_cache() const { return edf_cache_; }
+        edf_cache_t& edf_cache() { return edf_cache_; }
        private:
         int n_worker = 1;
         SRPDE* model_;

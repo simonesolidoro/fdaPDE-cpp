@@ -89,7 +89,7 @@ class GSRPDE {
         // initialize mean vector
         vector_t y = y_;
         solver_.update_response_and_weights(y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
-        transform_(mu_, y);
+        transform_(mu_, y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         n_iter_ = 0;
         while (n_iter_ < max_iter_ && std::abs(Jnew - Jold) > tol_) {

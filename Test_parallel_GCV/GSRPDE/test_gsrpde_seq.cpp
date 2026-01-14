@@ -17,7 +17,7 @@ int main() {
     // data
     GeoFrame data(D);
     auto& l1 = data.insert_scalar_layer<POINT>("l1", "../../test/data/gsr/01/locs.csv");
-    l1.load_csv<double>("../data/gsr/01/response.csv");
+    l1.load_csv<double>("../../test/data/gsr/01/response.csv");
     // physics
     FeSpace Vh(D, P1<1>);
     TrialFunction f(Vh);

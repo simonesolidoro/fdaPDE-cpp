@@ -724,7 +724,7 @@ struct fe_ls_elliptic_gsr {
         n_covs_ = covs.size();
         const auto& y_data = gf[0].data().template col<double>(formula_.lhs());
         y_[0].resize(n_locs_, y_data.blk_sz());
-        y_data.assign_to(y_);
+        y_data.assign_to(y_[0]);
 
         if (b_[0].cols() != y_[0].cols()) {//idea: verifiche su b_[0] e poi aggiornamenti eventual su tutti i b_[i], questo perché tutti i b_[i] devono essere sempre uguali a b_ 
             b_[0].resize(2 * n_dofs_, y_[0].cols()); //idea di sopra era superflua erché prepara_per_parallelo() gia copia b[0] in b[i] 
@@ -735,7 +735,7 @@ struct fe_ls_elliptic_gsr {
             X_.resize(n_locs_, n_covs_);   // assemble design matrix
             for (int i = 0; i < n_covs_; ++i) { gf[0].data().template col<double>(covs[i]).assign_to(X_.col(i)); }
         }
-        update_response_and_weights(0,y_[0], W[0]);   // this updates also design_matrix releated matrices. // per ora analize solo costruzione e quindi solo su worker_id = 0
+        update_response_and_weights(0,y_[0], W);   // this updates also design_matrix releated matrices. // per ora analize solo costruzione e quindi solo su worker_id = 0
         return;
     }
     // evaluates basis system at physical locations
@@ -959,7 +959,7 @@ struct fe_ls_elliptic_gsr {
     // left multiplication by \Psi
     vector_t lmbPsi(const vector_t& rhs) const { return Psi_ * rhs; }
     vector_t fn(int worker_id = 0) const { return Psi_ * f_[worker_id]; }
-    matrix_t Q(int worker_id) const { return internals::lmbQ(W_, X_, invXtWX_[worker_id], matrix_t::Identity(n_locs_, n_locs_)); }
+    matrix_t Q(int worker_id) const { return internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], matrix_t::Identity(n_locs_, n_locs_)); }
 
     // observers
     int n_dofs() const { return n_dofs_; }
@@ -1070,7 +1070,30 @@ template <typename BilinearForm_, typename LinearForm_> struct fe_ls_elliptic {
    private:
     penalty_packet penalty_;
 };
-
+// elliptic solver API
+template <typename BilinearForm_, typename LinearForm_> struct fe_ls_elliptic_gsr {
+    using solver_t = internals::fe_ls_elliptic_gsr;
+   private:
+    struct penalty_packet {
+        using BilinearForm = std::decay_t<BilinearForm_>;
+        using LinearForm = std::decay_t<LinearForm_>;
+       private:
+        BilinearForm bilinear_form_;
+        LinearForm linear_form_;
+       public:
+        penalty_packet(const BilinearForm_& bilinear_form, const LinearForm_& linear_form) :
+            bilinear_form_(bilinear_form), linear_form_(linear_form) { }
+        // observers
+        const BilinearForm& bilinear_form() const { return bilinear_form_; }
+        const LinearForm& linear_form() const { return linear_form_; }
+    };
+   public:
+    fe_ls_elliptic_gsr(const BilinearForm_& bilinear_form, const LinearForm_& linear_form) :
+        penalty_(bilinear_form, linear_form) { }
+    const penalty_packet& get() const { return penalty_; }
+   private:
+    penalty_packet penalty_;
+};
 }   // namespace fdapde
 
 #endif // __FE_LS_ELLIPTIC_SOLVER_H__

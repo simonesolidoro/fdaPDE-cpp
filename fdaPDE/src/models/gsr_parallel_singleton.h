@@ -189,7 +189,10 @@ std::cout<<"FIT: while- data_loss"<<std::endl;
     gcv_t gcv(int r, int seed) { return gcv_t(this, r, seed); }
     gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
 
-    void prepara_per_parallelo(){ solver_.prepara_per_parallelo();}
+    void prepara_per_parallelo(){ 
+        solver_.prepara_per_parallelo();
+        prepara_fit_parallelo();    
+    }
     // inference
     void prepara_fit_parallelo(){
         n_worker_ = singleton_threadpool::instance().n_workers();

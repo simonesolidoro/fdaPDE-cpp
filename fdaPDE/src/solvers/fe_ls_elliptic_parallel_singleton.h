@@ -1005,6 +1005,7 @@ struct fe_ls_elliptic_gsr {
             lambda_saved_[i] = lambda_saved_[0];
             b_[i]            = b_[0];
             W_changed_[i]    = W_changed_[0];
+            n_obs_[i]        = n_obs_[0];
         }
     }
    protected:

@@ -28,6 +28,6 @@ int main() {
     // modeling
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));//per il momento internals::
     m.fit(/* lambda = */0, 1.25e-06);
-
+    std::cout<<m.f(0);
 //    EXPECT_TRUE(almost_equal<double>(m.f(), "../../test/data/gsr/01/field.mtx"));
 }

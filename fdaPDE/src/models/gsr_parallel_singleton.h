@@ -89,20 +89,20 @@ class GSRPDE {
         // initialize mean vector
         vector_t y = y_;
         solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
-        transform_(mu_, y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
+        transform_(mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
-            vector_t G = distr_->der_link(mu_);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
-            pW_ = ((G.array().pow(2) * distr_->variance(mu_).array()).inverse()).matrix();
-            py_ = G.asDiagonal() * (y - mu_) + distr_->link(mu_);
+            vector_t G = distr_->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
+            pW_[worker_id] = ((G.array().pow(2) * distr_->variance(mu_[worker_id]).array()).inverse()).matrix();
+            py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_->link(mu_[worker_id]);
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
-	    solver_.update_response_and_weights(worker_id, py_, pW_.asDiagonal());
+	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
             solver_.fit(worker_id, std::forward<Args>(args)...);
-            mu_ = distr_->inv_link(fitted());
+            mu_[worker_id] = distr_->inv_link(fitted(worker_id));
             // prepare for next iteration
             double data_loss =
-              (distr_->variance(mu_).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_)).squaredNorm() / n_obs_;
+              (distr_->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
             Jnew = data_loss + solver_.ftPf(lambda,worker_id);
 	    n_iter++;
@@ -181,13 +181,20 @@ class GSRPDE {
     gcv_t gcv(int r, int seed) { return gcv_t(this, r, seed); }
     gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
 
+    void prepara_per_parallelo(){ solver_.prepara_per_parallelo();}
     // inference
-  
+    void prepara_fit_parallelo(){
+        n_worker_ = singleton_threadpool::instance().n_workers();
+        mu_.resize(n_worker);
+        py_.resize(n_worker);
+        pW_.resize(n_worker);
+    }
    private:
+    int n_worker_ = 1;
     vector_t y_;
-    vector_t mu_;          // \mu^k = [ \mu^k_1, ..., \mu^k_n ] : mean vector at step k
-    vector_t py_;          // \tilde y^k = G^k(y-u^k) + \theta^k
-    vector_t pW_;          // diagonal of W^k = ((G^k)^{-2})*((V^k)^{-1})
+    std::vector<vector_t> mu_;          // \mu^k = [ \mu^k_1, ..., \mu^k_n ] : mean vector at step k
+    std::vector<vector_t> py_;          // \tilde y^k = G^k(y-u^k) + \theta^k
+    std::vector<vector_t> pW_;          // diagonal of W^k = ((G^k)^{-2})*((V^k)^{-1})
     int max_iter_ = 200;   // fpirls maximum iteration number
     double tol_ = 1e-6;    // fprils convergence tolerance
 

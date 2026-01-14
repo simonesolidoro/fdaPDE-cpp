@@ -89,19 +89,26 @@ class GSRPDE {
           args...);
         // initialize mean vector
         vector_t y = y_;
+std::cout<<"FIT: update_r_w"<<std::endl;
         solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
+std::cout<<"FIT: transform_"<<std::endl;
         transform_(mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
+std::cout<<"FIT: while"<<std::endl;
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
             vector_t G = distr_->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
             pW_[worker_id] = ((G.array().pow(2) * distr_->variance(mu_[worker_id]).array()).inverse()).matrix();
             py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_->link(mu_[worker_id]);
+std::cout<<"FIT: while- update-r-w"<<std::endl;
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
+std::cout<<"FIT: while- fit"<<std::endl;
             solver_.fit(worker_id, std::forward<Args>(args)...);
+std::cout<<"FIT: while- mu_"<<std::endl;
             mu_[worker_id] = distr_->inv_link(fitted(worker_id));
             // prepare for next iteration
+std::cout<<"FIT: while- data_loss"<<std::endl;
             double data_loss =
               (distr_->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
@@ -193,9 +200,9 @@ class GSRPDE {
    private:
     int n_worker_ = 1;
     vector_t y_;
-    std::vector<vector_t> mu_;          // \mu^k = [ \mu^k_1, ..., \mu^k_n ] : mean vector at step k
-    std::vector<vector_t> py_;          // \tilde y^k = G^k(y-u^k) + \theta^k
-    std::vector<vector_t> pW_;          // diagonal of W^k = ((G^k)^{-2})*((V^k)^{-1})
+    std::vector<vector_t> mu_ = std::vector<vector_t>(1);          // \mu^k = [ \mu^k_1, ..., \mu^k_n ] : mean vector at step k
+    std::vector<vector_t> py_ = std::vector<vector_t>(1);          // \tilde y^k = G^k(y-u^k) + \theta^k
+    std::vector<vector_t> pW_ = std::vector<vector_t>(1);          // diagonal of W^k = ((G^k)^{-2})*((V^k)^{-1})
     int max_iter_ = 200;   // fpirls maximum iteration number
     double tol_ = 1e-6;    // fprils convergence tolerance
 

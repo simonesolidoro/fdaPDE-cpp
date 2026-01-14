@@ -726,8 +726,8 @@ struct fe_ls_elliptic_gsr {
         y_[0].resize(n_locs_, y_data.blk_sz());
         y_data.assign_to(y_);
 
-        if (b_[0].cols() != y_.cols()) {//idea: verifiche su b_[0] e poi aggiornamenti eventual su tutti i b_[i], questo perché tutti i b_[i] devono essere sempre uguali a b_ 
-            b_[0].resize(2 * n_dofs_, y_.cols()); //idea di sopra era superflua erché prepara_per_parallelo() gia copia b[0] in b[i] 
+        if (b_[0].cols() != y_[0].cols()) {//idea: verifiche su b_[0] e poi aggiornamenti eventual su tutti i b_[i], questo perché tutti i b_[i] devono essere sempre uguali a b_ 
+            b_[0].resize(2 * n_dofs_, y_[0].cols()); //idea di sopra era superflua erché prepara_per_parallelo() gia copia b[0] in b[i] 
         }
         if (n_covs_ != 0) {
             if (require_woodbury_realloc) { U_ = matrix_t::Zero(2 * n_dofs_, n_covs_); }
@@ -743,7 +743,7 @@ struct fe_ls_elliptic_gsr {
         fdapde_static_assert(GeoFrame::Order == 1, THIS_CLASS_IS_FOR_ORDER_ONE_GEOFRAMES_ONLY);
         fdapde_assert(gf.n_layers() == 1);
         n_obs_[0] = gf[0].rows();
-        n_locs_ = n_obs_;
+        n_locs_ = n_obs_[0];
         eval_basis_at_(gf);   // update \Psi matrix
         W_[0] = W; //analize_data usato solo in costruzione, quindi solo in sequenziale su elemento 0 di W_ (se poi qualcuno lo modifichera allora metterò [worker_id] e int worker_id in input method)
         return;
@@ -763,7 +763,7 @@ struct fe_ls_elliptic_gsr {
         }
         if (old_n_obs != n_obs_[worker_id]) { W_[worker_id] *= (double)old_n_obs / n_obs_[worker_id]; }
         
-        b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_[worker_id] * y_[worker_id];
+        b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];
         
 	// enforce dirichlet bc, if any
         for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {    
@@ -776,16 +776,16 @@ struct fe_ls_elliptic_gsr {
         W_[worker_id] = W;
 	W_[worker_id] /= n_obs_[worker_id];
         if (n_covs_ == 0) {
-            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_[worker_id] * y_[worker_id];
+            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];
             
         } else {
             XtWX_[worker_id] = X_.transpose() * W_[worker_id] * X_;
             invXtWX_[worker_id] = XtWX_[worker_id].partialPivLu();
             invXtWXXtW_[worker_id] = invXtWX_[worker_id].solve(X_.transpose() * W_[worker_id]);   // (X^\top * W * X)^{-1} * (X^\top * W)
             // woodbury decomposition matrices
-            U_.block(0, 0, n_dofs_, n_covs_) = PsiNA().transpose() * D_ * W_[worker_id] * X_;
-            V_.block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_[worker_id] * PsiNA();    
-            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], y_[worker_id]);
+            U_.block(0, 0, n_dofs_, n_covs_) = PsiNA(worker_id).transpose() * D_ * W_[worker_id] * X_;
+            V_.block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_[worker_id] * PsiNA(worker_id);    
+            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], y_[worker_id]);
             
         }
         // enforce dirichlet bc, if any
@@ -814,11 +814,11 @@ struct fe_ls_elliptic_gsr {
 
     // main fit entry point
     std::pair<vector_t, vector_t> fit(int worker_id, double lambda) {
-        fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
+        fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
-              -PsiNA().transpose() * D_ * W_[worker_id] * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
             invA_[worker_id].compute(A);
 	    W_changed_[worker_id] = false;
@@ -849,11 +849,11 @@ struct fe_ls_elliptic_gsr {
     }
     // perform a nonparametric_fit, e.g. discarding possible covariates
     vector_t nonparametric_fit(int worker_id, double lambda) {
-        fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_ > 0);
+        fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda) {
             // assemble and factorize system matrix for nonparameteric part
             SparseBlockMatrix<double, 2, 2> A(
-              -PsiNA().transpose() * D_ * W_[worker_id] * PsiNA(), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
             invA_[worker_id].compute(A);
         }
@@ -867,7 +867,7 @@ struct fe_ls_elliptic_gsr {
         } else {
             vector_t b(2 * n_dofs_);
             // assemble nonparametric linear system rhs
-            b.block(0, 0, n_dofs_, 1) = -PsiNA().transpose() * D_ * W_[worker_id] * y_[worker_id];
+            b.block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];
             b.block(n_dofs_, 0, n_dofs_, 1) = lambda * u_;
 	    // enforce Dirichlet BCs, if any
             for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
@@ -897,9 +897,9 @@ struct fe_ls_elliptic_gsr {
             Bs_[worker_id] = matrix_t::Zero(2 * n_dofs_, r);   // implicitly enforce homogeneous forcing
         }
         if (n_covs_ == 0) {
-            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA().transpose() * D_ * W_[worker_id] * (*Us_[worker_id]);
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * (*Us_[worker_id]);
         } else {
-            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA().transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], *Us_[worker_id]);
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA(worker_id).transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], *Us_[worker_id]);
         }
 	// enforce Dirichlet BCs, if any
         for (size_t i = 0; i < dirichlet_dofs_.size(); ++i) {
@@ -923,7 +923,7 @@ struct fe_ls_elliptic_gsr {
         }
         if (lambda_saved_[worker_id].value() != lambda_) {
             SparseBlockMatrix<double, 2, 2> A(
-              -PsiNA().transpose() * D_ * W_[worker_id] * PsiNA(), lambda_ * R1_.transpose(), lambda_ * R1_, lambda_ * R0_);
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id), lambda_ * R1_.transpose(), lambda_ * R1_, lambda_ * R0_);
 	    enforce_lhs_dirichlet_bc_(A);	    
             invA_[worker_id].compute(A);
             lambda_saved_[worker_id] = lambda_;
@@ -996,8 +996,8 @@ struct fe_ls_elliptic_gsr {
         n_obs_.resize(n_worker);
         B_.resize(n_worker);
         W_.resize(n_worker);
-        XtWX_.resize(_worker);
-        invXtWX_.resize(_worker);
+        XtWX_.resize(n_worker);
+        invXtWX_.resize(n_worker);
         invXtWXXtW_.resize(n_worker);
 
         // copia lo stato del worker 0 sugli altri, solo dei dati che sono inizializzati 
@@ -1017,7 +1017,7 @@ struct fe_ls_elliptic_gsr {
     std::vector<std::optional<matrix_t>> Us_ = std::vector<std::optional<matrix_t>>(1);
 
     int n_dofs_ = 0, n_locs_ = 0, n_covs_ = 0;
-    std::vector<int> n_obs_ (1,0);
+    std::vector<int> n_obs_ = std::vector<int>(1,0);
     sparse_matrix_t R0_;    // n_dofs x n_dofs matrix [R0]_{ij} = \int_D \psi_i * \psi_j
     sparse_matrix_t R1_;    // n_dofs x n_dofs matrix [R1]_{ij} = \int_D a(\psi_i, \psi_j)
     sparse_matrix_t Psi_;   // n_obs x n_dofs matrix [Psi]_{ij} = \psi_j(p_i)

@@ -73,6 +73,7 @@ class GSRPDE {
         analyze_data(formula, gf, vector_t::Ones(gf[0].rows()).asDiagonal());
     }
     // fitting
+    //TODO: fit che prende solo args e usa worker_id = 0, per mantenere api come sequenziale
     // Functional penalized iterative reweighted least squares
     template <typename... Args> auto fit(int worker_id,Args&&... args) {
         fdapde_assert(distr_ != nullptr);
@@ -185,9 +186,9 @@ class GSRPDE {
     // inference
     void prepara_fit_parallelo(){
         n_worker_ = singleton_threadpool::instance().n_workers();
-        mu_.resize(n_worker);
-        py_.resize(n_worker);
-        pW_.resize(n_worker);
+        mu_.resize(n_worker_);
+        py_.resize(n_worker_);
+        pW_.resize(n_worker_);
     }
    private:
     int n_worker_ = 1;

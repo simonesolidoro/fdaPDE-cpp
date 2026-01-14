@@ -21,7 +21,7 @@
 
 namespace fdapde {
 
-template <typename VariationalSolver>
+template <typename VariationalSolver> //per ora da usare con solver fe_ls_elliptic_gsr !
     requires(std::is_same_v<typename VariationalSolver::solver_category, ls_solver>)
 class GSRPDE {
    private:
@@ -67,7 +67,7 @@ class GSRPDE {
             if (gf.contains(token)) { n_covs_++; }
         }
         solver_.analyze_data(formula, gf, W);
-        y_ = solver_.response();
+        y_ = solver_.response(0); //in costruzione e basdta quindi 0. y_non mi sembra venga modificata durante fit quindi lasciata una sola y_
     }
     template <typename GeoFrame> void analyze_data(const std::string& formula, const GeoFrame& gf) {
         analyze_data(formula, gf, vector_t::Ones(gf[0].rows()).asDiagonal());
@@ -88,38 +88,38 @@ class GSRPDE {
           args...);
         // initialize mean vector
         vector_t y = y_;
-        solver_.update_response_and_weights(y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
+        solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
         transform_(mu_, y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
-        n_iter_ = 0;
-        while (n_iter_ < max_iter_ && std::abs(Jnew - Jold) > tol_) {
+        int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
+        while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
             vector_t G = distr_->der_link(mu_);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
             pW_ = ((G.array().pow(2) * distr_->variance(mu_).array()).inverse()).matrix();
             py_ = G.asDiagonal() * (y - mu_) + distr_->link(mu_);
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
-	    solver_.update_response_and_weights(py_, pW_.asDiagonal());
-            solver_.fit(std::forward<Args>(args)...);
+	    solver_.update_response_and_weights(worker_id, py_, pW_.asDiagonal());
+            solver_.fit(worker_id, std::forward<Args>(args)...);
             mu_ = distr_->inv_link(fitted());
             // prepare for next iteration
             double data_loss =
               (distr_->variance(mu_).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_)).squaredNorm() / n_obs_;
             Jold = Jnew;
-            Jnew = data_loss + solver_.ftPf(lambda);
-	    n_iter_++;
+            Jnew = data_loss + solver_.ftPf(lambda,worker_id);
+	    n_iter++;
         }
-        return std::make_pair(solver_.f(), solver_.beta());
+        return std::make_pair(solver_.f(worker_id), solver_.beta(worker_id));
     }
     // observers
-    const vector_t& f() const { return solver_.f(); }
-    const vector_t& beta() const { return solver_.beta(); }
-    const vector_t& misfit() const { return solver_.misfit(); }
+    const vector_t& f(int worker_id = 0) const { return solver_.f(worker_id); }
+    const vector_t& beta(int worker_id = 0) const { return solver_.beta(worker_id); }
+    const vector_t& misfit(int worker_id = 0) const { return solver_.misfit(worker_id); }
     int n_covs() const { return n_covs_; }
     int n_obs() const { return n_obs_; }
     double edf(int r = 100, int seed = random_seed) { return solver_.edf(r, seed); }
     const vector_t& response() const { return solver_.response(); }
-    vector_t fitted() const {
-        matrix_t fitted_ = solver_.Psi() * f();
-        if (n_covs_ != 0) { fitted_ += solver_.design_matrix() * beta(); }
+    vector_t fitted(int worker_id = 0) const {
+        matrix_t fitted_ = solver_.Psi() * f(worker_id);
+        if (n_covs_ != 0) { fitted_ += solver_.design_matrix() * beta(worker_id); }
         return fitted_;
     }
 

@@ -26,8 +26,17 @@ int main() {
     ZeroField<2> u;
     auto F = integral(D)(u * v);
     // modeling
-    GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));//per il momento internals::
-    m.fit(/* lambda = */0, 1.25e-06);
+    GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic(a, F));//per il momento internals::
+    m.fit(/* lambda = */ 1.25e-06);
     
+    Eigen::VectorXd fi = m.f();
+
+    std::ofstream file("f_sequenziale_classico.txt");
+    if (!file) {
+        throw std::runtime_error("Cannot open output file");
+    }
+
+    file << fi << "\n";   // Eigen overload operator<<
+    file.close();
 //    EXPECT_TRUE(almost_equal<double>(m.f(), "../../test/data/gsr/01/field.mtx"));
 }

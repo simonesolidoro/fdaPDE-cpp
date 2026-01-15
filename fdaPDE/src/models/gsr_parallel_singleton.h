@@ -30,9 +30,9 @@ class GSRPDE {
     using matrix_t = Eigen::Matrix<double, Dynamic, Dynamic>;
     static constexpr int n_lambda = solver_t::n_lambda;
    public:
-    GSRPDE() noexcept : distr_(), solver_() { }
+    GSRPDE() noexcept : distr_{nullptr}, solver_() { }
     template <typename GeoFrame, typename Penalty>
-    GSRPDE(const std::string& formula, const GeoFrame& gf, Penalty&& penalty) noexcept : distr_(), solver_() {
+    GSRPDE(const std::string& formula, const GeoFrame& gf, Penalty&& penalty) noexcept : distr_{nullptr}, solver_() {
         discretize(penalty.get());
         analyze_data(formula, gf);
     }
@@ -46,7 +46,7 @@ class GSRPDE {
 
     // modifiers
     template <typename Distribution> void set_family(const Distribution& distr) {
-        distr_ = std::make_shared<Distribution>(distr);
+        distr_[0] = std::make_shared<Distribution>(distr); //per ora solo per costruzione sequenziale
         // store distribution transform handle
         transform_ = [this, distr](vector_t& mu, const vector_t& y) {
             if constexpr (requires(Distribution d, vector_t v) { d.transform(v); }) {
@@ -76,7 +76,7 @@ class GSRPDE {
     //TODO: fit che prende solo args e usa worker_id = 0, per mantenere api come sequenziale
     // Functional penalized iterative reweighted least squares
     template <typename... Args> auto fit(int worker_id,Args&&... args) {
-        fdapde_assert(distr_ != nullptr);
+        fdapde_assert(distr_[worker_id] != nullptr);
         vector_t lambda(n_lambda);
         internals::for_each_index_and_args<sizeof...(Args)>(
           [&]<int Ns_, typename Ts_>(const Ts_& ts) {
@@ -97,20 +97,20 @@ class GSRPDE {
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
 //std::cout<<"FIT: while"<<std::endl;
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
-            vector_t G = distr_->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
-            pW_[worker_id] = ((G.array().pow(2) * distr_->variance(mu_[worker_id]).array()).inverse()).matrix();
-            py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_->link(mu_[worker_id]);
+            vector_t G = distr_[worker_id]->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
+            pW_[worker_id] = ((G.array().pow(2) * distr_[worker_id]->variance(mu_[worker_id]).array()).inverse()).matrix();
+            py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_[worker_id]->link(mu_[worker_id]);
 //std::cout<<"FIT: while- update-r-w"<<std::endl;
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
 //std::cout<<"FIT: while- fit"<<std::endl;
             solver_.fit(worker_id, std::forward<Args>(args)...);
 //std::cout<<"FIT: while- mu_"<<std::endl;
-            mu_[worker_id] = distr_->inv_link(fitted(worker_id));
+            mu_[worker_id] = distr_[worker_id]->inv_link(fitted(worker_id));
             // prepare for next iteration
 //std::cout<<"FIT: while- data_loss"<<std::endl;
             double data_loss =
-              (distr_->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
+              (distr_[worker_id]->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
             Jnew = data_loss + solver_.ftPf(lambda,worker_id);
 	    n_iter++;
@@ -185,8 +185,8 @@ class GSRPDE {
             }
             double dor = n_ - (q_ + edf_cache_[worker_id].at(lambda_vec));   // residual degrees of freedom
 	    // compute total deviance
-            vector_t mu = model_->distr_->inv_link(model_->fitted(worker_id));
-            return (n_ / std::pow(dor, 2)) * model_->distr_->deviance(mu, model_->y_);
+            vector_t mu = model_->distr_[worker_id]->inv_link(model_->fitted(worker_id));
+            return (n_ / std::pow(dor, 2)) * model_->distr_[worker_id]->deviance(mu, model_->y_);
         }else{
             model_->fit(0,static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
@@ -195,8 +195,8 @@ class GSRPDE {
             }
             double dor = n_ - (q_ + edf_cache_[0].at(lambda_vec));   // residual degrees of freedom
 	    // compute total deviance
-            vector_t mu = model_->distr_->inv_link(model_->fitted(0));
-            return (n_ / std::pow(dor, 2)) * model_->distr_->deviance(mu, model_->y_);
+            vector_t mu = model_->distr_[0]->inv_link(model_->fitted(0));
+            return (n_ / std::pow(dor, 2)) * model_->distr_[0]->deviance(mu, model_->y_);
         }
     }
         // observers
@@ -219,7 +219,7 @@ class GSRPDE {
 
     void prepara_per_parallelo(){ 
         solver_.prepara_per_parallelo();
-        prepara_fit_parallelo();    
+        prepara_fit_parallelo(); 
     }
     // inference
     void prepara_fit_parallelo(){
@@ -227,6 +227,10 @@ class GSRPDE {
         mu_.resize(n_worker_);
         py_.resize(n_worker_);
         pW_.resize(n_worker_);
+        distr_.resize(n_worker_);
+        for (int i = 0; i<n_worker_; i++){
+            distr_[i]=distr_[0];
+        }   
     }
    private:
     int n_worker_ = 1;
@@ -237,7 +241,7 @@ class GSRPDE {
     int max_iter_ = 200;   // fpirls maximum iteration number
     double tol_ = 1e-6;    // fprils convergence tolerance
 
-    std::shared_ptr<simd_distribution> distr_; //acesso a distr_ non so se è thread-safe, da verificare e ele caso creare uno per worker
+    std::vector<std::shared_ptr<simd_distribution>> distr_ = std::vector<std::shared_ptr<simd_distribution>> (1); //acesso a distr_ non so se è thread-safe, da verificare e ele caso creare uno per worker
     std::function<void(vector_t&, const vector_t&)> transform_;
     solver_t solver_;
     int n_obs_ = 0, n_covs_ = 0;

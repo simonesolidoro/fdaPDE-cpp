@@ -89,26 +89,26 @@ class GSRPDE {
           args...);
         // initialize mean vector
         vector_t y = y_;
-std::cout<<"FIT: update_r_w"<<std::endl;
+//std::cout<<"FIT: update_r_w"<<std::endl;
         solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
-std::cout<<"FIT: transform_"<<std::endl;
+//std::cout<<"FIT: transform_"<<std::endl;
         transform_(mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
-std::cout<<"FIT: while"<<std::endl;
+//std::cout<<"FIT: while"<<std::endl;
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
             vector_t G = distr_->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
             pW_[worker_id] = ((G.array().pow(2) * distr_->variance(mu_[worker_id]).array()).inverse()).matrix();
             py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_->link(mu_[worker_id]);
-std::cout<<"FIT: while- update-r-w"<<std::endl;
+//std::cout<<"FIT: while- update-r-w"<<std::endl;
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
-std::cout<<"FIT: while- fit"<<std::endl;
+//std::cout<<"FIT: while- fit"<<std::endl;
             solver_.fit(worker_id, std::forward<Args>(args)...);
-std::cout<<"FIT: while- mu_"<<std::endl;
+//std::cout<<"FIT: while- mu_"<<std::endl;
             mu_[worker_id] = distr_->inv_link(fitted(worker_id));
             // prepare for next iteration
-std::cout<<"FIT: while- data_loss"<<std::endl;
+//std::cout<<"FIT: while- data_loss"<<std::endl;
             double data_loss =
               (distr_->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
@@ -123,7 +123,7 @@ std::cout<<"FIT: while- data_loss"<<std::endl;
     const vector_t& misfit(int worker_id = 0) const { return solver_.misfit(worker_id); }
     int n_covs() const { return n_covs_; }
     int n_obs() const { return n_obs_; }
-    double edf(int r = 100, int seed = random_seed) { return solver_.edf(r, seed); }
+    double edf(int r = 100, int seed = random_seed, int worker_id = 0) { return solver_.edf(r, seed, worker_id); }
     const vector_t& response() const { return solver_.response(); }
     vector_t fitted(int worker_id = 0) const {
         matrix_t fitted_ = solver_.Psi() * f(worker_id);
@@ -150,10 +150,10 @@ std::cout<<"FIT: while- data_loss"<<std::endl;
             edf_cache_(edf_cache),
             r_(100),
             seed_(random_seed) { }
-        gcv_t(GSRPDE* model, const edf_cache_t& edf_cache, int r, int seed) :
+        gcv_t(GSRPDE* model, const std::vector<edf_cache_t>& edf_cache, int r, int seed) :
             model_(model), n_(model->n_obs()), q_(model->n_covs()), edf_cache_(edf_cache), r_(r), seed_(seed) { }
-        gcv_t(GSRPDE* model) : gcv_t(model, edf_cache_t()) { }
-        gcv_t(GSRPDE* model, int r, int seed) : gcv_t(model, edf_cache_t(), r, seed) { }
+        gcv_t(GSRPDE* model) : gcv_t(model, std::vector<edf_cache_t>(1)) { }
+        gcv_t(GSRPDE* model, int r, int seed) : gcv_t(model, std::vector<edf_cache_t>(1), r, seed) { }
 
         template <typename InputType_>
             requires(internals::is_subscriptable<InputType_, int>)
@@ -163,31 +163,59 @@ std::cout<<"FIT: while- data_loss"<<std::endl;
         template <typename... LambdaT>
             requires(std::is_convertible_v<LambdaT, double> && ...)
         constexpr double operator()(LambdaT... lambda) {
-            model_->fit(static_cast<double>(lambda)...);
+        if(singleton_threadpool::status()){
+            if(!ready_per_parallelo){
+                std::lock_guard<std::mutex> lock(m_gcv_);
+                if(!ready_per_parallelo){
+                    model_->prepara_per_parallelo();
+                    int n_worker = singleton_threadpool::instance().n_workers();
+                    edf_cache_.resize(n_worker);
+                    for (int i = 1; i<n_worker; i++){
+                        edf_cache_[i] = edf_cache_[0];
+                    }
+                } // lettura di nuovo di flag dentro al mutex così affidabile (dovrei mettere atomic e memory order, per il mommento lascio così poi se c'è tempo ci torno)
+                ready_per_parallelo = true;
+            } 
+            //esecuzione parallela
+            int worker_id = singleton_threadpool::instance().index_worker();
+            model_->fit(worker_id, static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
-            if (edf_cache_.find(lambda_vec) == edf_cache_.end()) {   // cache Tr[S]
-                edf_cache_[lambda_vec] = model_->edf(r_, seed_);
+            if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]
+                edf_cache_[worker_id][lambda_vec] = model_->edf(r_, seed_, worker_id);
             }
-            double dor = n_ - (q_ + edf_cache_.at(lambda_vec));   // residual degrees of freedom
+            double dor = n_ - (q_ + edf_cache_[worker_id].at(lambda_vec));   // residual degrees of freedom
 	    // compute total deviance
-            vector_t mu = model_->distr_->inv_link(model_->fitted());
+            vector_t mu = model_->distr_->inv_link(model_->fitted(worker_id));
+            return (n_ / std::pow(dor, 2)) * model_->distr_->deviance(mu, model_->y_);
+        }else{
+            model_->fit(0,static_cast<double>(lambda)...);
+            std::array<double, StaticInputSize> lambda_vec {lambda...};
+            if (edf_cache_[0].find(lambda_vec) == edf_cache_[0].end()) {   // cache Tr[S]
+                edf_cache_[0][lambda_vec] = model_->edf(r_, seed_, 0);
+            }
+            double dor = n_ - (q_ + edf_cache_[0].at(lambda_vec));   // residual degrees of freedom
+	    // compute total deviance
+            vector_t mu = model_->distr_->inv_link(model_->fitted(0));
             return (n_ / std::pow(dor, 2)) * model_->distr_->deviance(mu, model_->y_);
         }
+    }
         // observers
-        const edf_cache_t& edf_cache() const { return edf_cache_; }
-        edf_cache_t& edf_cache() { return edf_cache_; }
+        const edf_cache_t& edf_cache(int worker_id = 0) const { return edf_cache_[worker_id]; }
+        edf_cache_t& edf_cache(int worker_id = 0) { return edf_cache_[worker_id]; }
        private:
         GSRPDE* model_;
         int n_ = 0, q_ = 0;
-        edf_cache_t edf_cache_;
+        std::vector<edf_cache_t> edf_cache_ = std::vector<edf_cache_t> (1);
         // stochastic edf approximation parameter
         int r_, seed_;
+        std::atomic<bool> ready_per_parallelo = false;
+        std::mutex m_gcv_;
     };
     friend gcv_t;
     gcv_t gcv() { return gcv_t(this); }
-    gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache) { return gcv_t(this, edf_cache); }
+    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache) { return gcv_t(this, edf_cache); }
     gcv_t gcv(int r, int seed) { return gcv_t(this, r, seed); }
-    gcv_t gcv(const typename gcv_t::edf_cache_t& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
+    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
 
     void prepara_per_parallelo(){ 
         solver_.prepara_per_parallelo();
@@ -209,7 +237,7 @@ std::cout<<"FIT: while- data_loss"<<std::endl;
     int max_iter_ = 200;   // fpirls maximum iteration number
     double tol_ = 1e-6;    // fprils convergence tolerance
 
-    std::shared_ptr<simd_distribution> distr_;
+    std::shared_ptr<simd_distribution> distr_; //acesso a distr_ non so se è thread-safe, da verificare e ele caso creare uno per worker
     std::function<void(vector_t&, const vector_t&)> transform_;
     solver_t solver_;
     int n_obs_ = 0, n_covs_ = 0;

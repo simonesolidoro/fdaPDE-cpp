@@ -145,13 +145,13 @@ class SRPDE {
         const edf_cache_t& edf_cache(int worker_id = 0) const { return edf_cache_[worker_id]; }
         edf_cache_t& edf_cache(int worker_id = 0) { return edf_cache_[worker_id]; }
        private:
-        int n_worker = 1;
+        int n_worker = 1; //mi sa inutile
         SRPDE* model_;
         int n_ = 0, q_ = 0;
-        std::vector<edf_cache_t> edf_cache_{1}; //per ora vector, poi meglio globale e accesso sicuro tramite shared-mutex  
+        std::vector<edf_cache_t> edf_cache_{1};// da cambiare con std::vector<edf_cache_t> edf_cache_ = std::vector<edf_cache_t> (1); //per ora vector, poi meglio globale e accesso sicuro tramite shared-mutex  
         // stochastic edf approximation parameter
         int r_, seed_;
-        bool ready_per_parallelo = false;
+        bool ready_per_parallelo = false; //atomico ? credo di si
         std::mutex m_gcv_;
     };
     gcv_t gcv() { return gcv_t(this); }

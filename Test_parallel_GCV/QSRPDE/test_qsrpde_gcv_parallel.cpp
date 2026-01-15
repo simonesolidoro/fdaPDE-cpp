@@ -42,8 +42,8 @@ int main() {
     // modeling
     QSRPDE m("y ~ f", data, /* alpha = */ 0.1, fe_ls_elliptic_gsr(a, F));
     //m.fit(0,/* lambda = */ 1.778279 * std::pow(0.1, 4));
-    std::vector<double> lambda_grid(16);
-    for (int i = 0; i < 16; ++i) {lambda_grid[i] = 1.778279 * std::pow(0.1, 4); };
+    std::vector<double> lambda_grid(120);
+    for (int i = 0; i < 120; ++i) {lambda_grid[i] = 1.778279 * std::pow(0.1, 4); };
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();

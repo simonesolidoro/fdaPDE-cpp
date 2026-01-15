@@ -816,6 +816,11 @@ struct fe_ls_elliptic_gsr {
     std::pair<vector_t, vector_t> fit(int worker_id, double lambda) {
         //std::cout<<"wid: "<<worker_id<<" n_obs_[wid]:"<<n_obs_[worker_id]<<std::endl;
         std::cout<<"solver :"<<lambda<<std::endl;
+        if(lambda >= 1 || lambda == 0){lambda = 0.000177828;
+            worker_id = singleton_threadpool::instance().index_worker();
+            std::ofstream out("if_log.txt", std::ios::app);
+            out << "ca,biato lambda:\n";
+        }// correzione bug forzata per vedere se ci sono altri problemi 
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part

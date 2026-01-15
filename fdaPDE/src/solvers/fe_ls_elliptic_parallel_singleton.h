@@ -817,10 +817,46 @@ struct fe_ls_elliptic_gsr {
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part
+//std::cout<<"thread:"<<std::this_thread::get_id()<<" ricalcola invA"<<std::endl;
+//std::cout<<W_[worker_id].rows()<<"x"<<W_[worker_id].cols()<<"  "<<PsiNA(worker_id).rows()<<"x"<<PsiNA(worker_id).cols()<<std::endl;
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
             invA_[worker_id].compute(A);
+            if (invA_[worker_id].info() != Eigen::Success){
+                std::ofstream out(
+                    "debug_worker_" + std::to_string(worker_id) + ".txt",
+                    std::ios::out | std::ios::trunc
+                );
+
+                out << "[worker " << worker_id << "]\n";
+                out << "lambda = " << lambda << "\n";
+                out << "n_obs = " << n_obs_[worker_id]
+                    << "  n_dofs = " << n_dofs_ << "\n\n";
+
+                out << "PsiNA (" << PsiNA(worker_id).rows()
+                    << " x " << PsiNA(worker_id).cols() << ")\n";
+                out << PsiNA(worker_id) << "\n\n";
+
+                out << "W_ (" << W_[worker_id].rows()
+                    << " x " << W_[worker_id].cols() << ")\n";
+                out << W_[worker_id] << "\n\n";
+
+                out << "D_ (" << D_.rows()
+                    << " x " << D_.cols() << ")\n";
+
+                out << "R1_ (" << R1_.rows()
+                    << " x " << R1_.cols() << ")\n";
+
+                out << "R0_ (" << R0_.rows()
+                    << " x " << R0_.cols() << ")\n";
+
+                out.close();
+
+                std::cerr << "SparseLU compute FAILED for worker "
+                        << worker_id
+                        << " (see debug_worker_" << worker_id << ".txt)\n";
+            }
 	    W_changed_[worker_id] = false;
         }
         if (lambda_saved_[worker_id].value() != lambda) {
@@ -831,6 +867,7 @@ struct fe_ls_elliptic_gsr {
         lambda_saved_[worker_id] = lambda;
         vector_t x;
         if (n_covs_ == 0) {
+//std::cout<<"thread:"<<std::this_thread::get_id()<<" solve"<<std::endl;
             x = invA_[worker_id].solve(b_[worker_id]);
             f_[worker_id] = x.topRows(n_dofs_);
         } else {

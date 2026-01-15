@@ -178,6 +178,7 @@ class GSRPDE {
             } 
             //esecuzione parallela
             int worker_id = singleton_threadpool::instance().index_worker();
+//std::cout<<"worker-"<<worker_id<<std::endl;
             model_->fit(worker_id, static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
             if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]

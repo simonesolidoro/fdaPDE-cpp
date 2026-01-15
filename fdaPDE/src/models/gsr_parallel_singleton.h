@@ -39,7 +39,7 @@ class GSRPDE {
     template <typename GeoFrame, typename Distribution, typename Penalty>
     GSRPDE(const std::string& formula, const GeoFrame& gf, const Distribution& distr, Penalty&& penalty) noexcept :
         GSRPDE(formula, gf, penalty) {
-        discretize(penalty.get());
+        discretize(penalty.get()); //perche ripetere ? non viene gia fatto dal costruttore delegato?
         analyze_data(formula, gf);
         set_family(distr);
     }
@@ -48,7 +48,7 @@ class GSRPDE {
     template <typename Distribution> void set_family(const Distribution& distr) {
         distr_[0] = std::make_shared<Distribution>(distr); //per ora solo per costruzione sequenziale
         // store distribution transform handle
-        transform_ = [this, distr](vector_t& mu, const vector_t& y) {
+        transform_[0] = [this, distr](vector_t& mu, const vector_t& y) {
             if constexpr (requires(Distribution d, vector_t v) { d.transform(v); }) {
                 mu = distr.transform(y);
             } else {
@@ -89,26 +89,35 @@ class GSRPDE {
           args...);
         // initialize mean vector
         vector_t y = y_;
-//std::cout<<"FIT: update_r_w"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: update_r_w"<<std::endl;}
         solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
-//std::cout<<"FIT: transform_"<<std::endl;
-        transform_(mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
+if(worker_id == 0){std::cout<<"FIT: transform_"<<std::endl;}
+        transform_[worker_id](mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
-//std::cout<<"FIT: while"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: while"<<std::endl;}
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
+if(worker_id == 0){std::cout<<"worker-"<<worker_id<<" in while"<<std::endl;}
             vector_t G = distr_[worker_id]->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
             pW_[worker_id] = ((G.array().pow(2) * distr_[worker_id]->variance(mu_[worker_id]).array()).inverse()).matrix();
             py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_[worker_id]->link(mu_[worker_id]);
-//std::cout<<"FIT: while- update-r-w"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: while- update-r-w"<<std::endl;}
+// if(worker_id == 1){
+//     std::ofstream out("vector1.txt", std::ios::app);
+//     out << pW_[1].rows() << " " << pW_[0].cols()<< "   ";
+//     out << py_[1].rows() << " " << py_[0].cols() << "\n";
+//     out << pW_[1] << "\n";
+//     out << py_[1] << "\n\n";    
+// }
+
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
-//std::cout<<"FIT: while- fit"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: while- fit"<<std::endl;}
             solver_.fit(worker_id, std::forward<Args>(args)...);
-//std::cout<<"FIT: while- mu_"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: while- mu_"<<std::endl;}
             mu_[worker_id] = distr_[worker_id]->inv_link(fitted(worker_id));
             // prepare for next iteration
-//std::cout<<"FIT: while- data_loss"<<std::endl;
+if(worker_id == 0){std::cout<<"FIT: while- data_loss"<<std::endl;}
             double data_loss =
               (distr_[worker_id]->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
@@ -229,8 +238,15 @@ class GSRPDE {
         py_.resize(n_worker_);
         pW_.resize(n_worker_);
         distr_.resize(n_worker_);
-        for (int i = 0; i<n_worker_; i++){
-            distr_[i]=distr_[0];
+        transform_.resize(n_worker_);
+        for (int i = 1; i<n_worker_; i++){
+            // distr_[i] = std::make_shared<fdapde::poisson_distribution> (); // per il mometo hard-coded poisson solo per capire se prolema di data race era distr_
+            // transform_[i] = transform_[0]; 
+            auto p0 = std::dynamic_pointer_cast<fdapde::poisson_distribution>(distr_[0]);
+            fdapde_assert(p0 && "distr_[0] is not poisson_distribution");
+            distr_[i] = std::make_shared<fdapde::poisson_distribution>(*p0); //
+            transform_[i] = transform_[0];
+
         }   
     }
    private:
@@ -243,7 +259,7 @@ class GSRPDE {
     double tol_ = 1e-6;    // fprils convergence tolerance
 
     std::vector<std::shared_ptr<simd_distribution>> distr_ = std::vector<std::shared_ptr<simd_distribution>> (1); //acesso a distr_ non so se è thread-safe, da verificare e ele caso creare uno per worker
-    std::function<void(vector_t&, const vector_t&)> transform_;
+    std::vector<std::function<void(vector_t&, const vector_t&)>> transform_ = std::vector<std::function<void(vector_t&, const vector_t&)>>(1);// vettore per trasform_ per disperazione, peso sia gia thread-safe
     solver_t solver_;
     int n_obs_ = 0, n_covs_ = 0;
     int n_iter_ = 0;

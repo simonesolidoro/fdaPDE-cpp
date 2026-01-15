@@ -28,8 +28,8 @@ int main() {
     // modeling
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));
     
-    std::vector<double> lambda_grid(640);
-    for (int i = 0; i < 640; ++i) {lambda_grid[i] = 1.25e-06; };//lambda_grid[i] = (1.00+0.05*i)*std::pow(10, -6.0); }
+    std::vector<double> lambda_grid(1200);
+    for (int i = 0; i < 1200; ++i) {lambda_grid[i] = 1.25e-06; };//lambda_grid[i] = (1.00+0.05*i)*std::pow(10, -6.0); }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();

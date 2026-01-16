@@ -584,6 +584,578 @@ class fe_ls_separable_mono {
     std::vector<bool> W_changed_ = std::vector<bool>(1);
 };
 
+//per gsr e qsr thread-safe anche update_pesi e risposta. 
+// solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i, t_j)) \|_2^2 + \int_D \int_T (L_D(f) - u_D)^2 +
+// \int_T \int_D (L_T(f) - u_T)^2
+class fe_ls_separable_mono_gsr {
+   private:
+   int n_worker = 1;
+    using vector_t = Eigen::Matrix<double, Dynamic, 1>;
+    using matrix_t = Eigen::Matrix<double, Dynamic, Dynamic>;
+    using binary_t = BinaryMatrix<Dynamic, Dynamic>;
+    using sparse_matrix_t = Eigen::SparseMatrix<double>;
+    using diag_matrix_t   = Eigen::DiagonalMatrix<double, Dynamic, Dynamic>;
+    using sparse_solver_t = eigen_sparse_solver_movable_wrap<Eigen::SparseLU<sparse_matrix_t>>;
+    using dense_solver_t  = Eigen::PartialPivLU<matrix_t>;
+    template <typename DataLocs>
+    static constexpr bool is_valid_data_locs_descriptor_v =
+      std::is_same_v<DataLocs, matrix_t> || std::is_same_v<DataLocs, binary_t>;
+    template <typename Penalty> struct is_valid_penalty {
+       private:
+        using LhsPenalty = typename Penalty::LhsPenalty;
+        using RhsPenalty = typename Penalty::RhsPenalty;
+        template <typename Penalty_> struct is_valid_penalty_impl {
+            static constexpr bool value = requires(Penalty_ penalty) {
+                penalty.bilinear_form();
+                penalty.linear_form();
+            };
+        };
+       public:
+        static constexpr bool value = requires(Penalty penalty) {
+            penalty.lhs_penalty();
+            penalty.rhs_penalty();
+        } && is_valid_penalty_impl<LhsPenalty>::value && is_valid_penalty_impl<RhsPenalty>::value;
+    };
+    template <typename Penalty> static constexpr bool is_valid_penalty_v = is_valid_penalty<Penalty>::value;
+
+    template <typename Tuple> struct function_space_tuple {
+        using type = decltype([]<size_t... Is_>(std::index_sequence<Is_...>) {
+            return std::make_tuple(typename std::tuple_element_t<Is_, Tuple>::TrialSpace {}...);
+        }(std::make_index_sequence<std::tuple_size_v<Tuple>>()));
+    };
+    template <typename Penalty1, typename Penalty2>
+    const auto& fe_penalty_(const Penalty1& penalty1, const Penalty2& penalty2) const {
+        return select_one_between(
+          penalty1, penalty2, []() { return  is_fe_space_v<typename Penalty1::BilinearForm::TrialSpace>; });
+    }
+    template <typename Penalty1, typename Penalty2>
+    const auto& bs_penalty_(const Penalty1& penalty1, const Penalty2& penalty2) const {
+        return select_one_between(
+          penalty1, penalty2, []() { return !is_fe_space_v<typename Penalty1::BilinearForm::TrialSpace>; });
+    }
+   public:
+    static constexpr int n_lambda = 2;
+    using solver_category = ls_solver;
+   private:  
+    // evaluation of basis system at spatial locations
+    template <typename... DataLocs>
+        requires((is_valid_data_locs_descriptor_v<DataLocs> && ...) && (sizeof...(DataLocs) == n_lambda))
+    void eval_basis_at_(const DataLocs&... locs) {
+        std::array<sparse_matrix_t, n_lambda> Psi__;
+        internals::for_each_index_and_args<n_lambda>(
+          [&]<int Ns, typename Ts>(const Ts& locs) {
+              if constexpr (std::is_same_v<Ts, matrix_t>) {   // pointwise sampling
+                  Psi__[Ns] = point_eval_[Ns](locs);
+              } else {   // areal sampling
+                  const auto& [psi, measure_vect] = areal_eval_[Ns](locs);
+                  Psi__[Ns] = psi;
+              }
+          },
+          locs...);
+        Psi_ = kronecker(Psi__[1], Psi__[0]);
+        D_ = vector_t::Ones(n_locs_).asDiagonal();
+        return;
+    }
+    // optimized basis evaluation at geoframe
+    template <typename GeoFrame> void eval_basis_at_(const GeoFrame& gf) {
+        std::array<sparse_matrix_t, 2> Psi__;
+        internals::for_each_index_in_pack<n_lambda>([&]<int Ns>() {
+            switch (gf.category(0)[Ns]) {
+            case ltype::point: {
+                const auto& spatial_index = geo_index_cast<Ns, POINT>(gf[0]);
+                if (spatial_index.points_at_dofs()) {
+                    Psi__[Ns].resize(n_locs_, n_dofs_);
+                    Psi__[Ns].setIdentity();
+                } else {
+                    Psi__[Ns] = point_eval_[Ns](spatial_index.coordinates());
+                }
+                D_ = vector_t::Ones(n_locs_).asDiagonal();
+                break;
+            }
+            case ltype::areal: {
+                const auto& spatial_index = geo_index_cast<Ns, POLYGON>(gf[0]);
+                const auto& [psi, measure_vec] = areal_eval_[Ns](spatial_index.incidence_matrix());
+                Psi__[Ns] = psi;
+                vector_t D(n_locs_);
+		int m = n_locs_ / spatial_index.rows();
+                for (int i = 0; i < m; ++i) { D.segment(i * measure_vec.rows(), measure_vec.rows()) = measure_vec; }
+                D_ = D.asDiagonal();
+                break;
+            }
+            }
+        });
+        Psi_ = kronecker(Psi__[1], Psi__[0]);
+        return;
+    }
+   public:
+    fe_ls_separable_mono_gsr() noexcept = default;
+    // construct from formula + geoframe
+    template <typename GeoFrame, typename WeightMatrix, typename Penalty>
+        requires(is_valid_penalty_v<Penalty>)
+    fe_ls_separable_mono_gsr(const std::string& formula, const GeoFrame& gf, Penalty&& penalty, const WeightMatrix& W) {
+        fdapde_static_assert(GeoFrame::Order == 2, THIS_CLASS_IS_FOR_ORDER_TWO_GEOFRAMES_ONLY);
+	fdapde_assert(gf.n_layers() == 1);
+        n_obs_[0]  = gf[0].rows();
+        n_locs_ = n_obs_[0];
+
+        discretize(penalty);
+        analyze_data(formula, gf, W);
+    }
+    template <typename GeoFrame, typename Penalty>
+        requires(is_valid_penalty_v<Penalty>)
+    fe_ls_separable_mono_gsr(const std::string& formula, const GeoFrame& gf, Penalty&& penalty) :
+        fe_ls_separable_mono_gsr(formula, gf, penalty, vector_t::Ones(gf[0].rows()).asDiagonal()) { }
+    // construct with no data
+    template <typename GeoFrame, typename Penalty, typename WeightMatrix>
+        requires(is_valid_penalty_v<Penalty>)
+    fe_ls_separable_mono_gsr(const GeoFrame& gf, Penalty&& penalty, const WeightMatrix& W) : W_(W) {
+        fdapde_static_assert(GeoFrame::Order == 2, THIS_CLASS_IS_FOR_ORDER_TWO_GEOFRAMES_ONLY);
+	fdapde_assert(gf.n_layers() == 1);
+        n_obs_[0]  = gf[0].rows();
+	n_locs_ = n_obs_[0];
+
+	discretize(penalty);
+	eval_basis_at_(gf);
+    }
+    template <typename GeoFrame, typename Penalty>
+        requires(is_valid_penalty_v<Penalty>)
+    fe_ls_separable_mono_gsr(const GeoFrame& gf, Penalty&& penalty) :
+        fe_ls_separable_mono_gsr(gf, penalty, vector_t::Ones(gf[0].rows()).asDiagonal()) { }
+
+    // numerical discretization
+    template <typename Penalty> void discretize(Penalty&& penalty) {
+        using LhsPenalty = typename std::decay_t<Penalty>::LhsPenalty;
+        using LhsBilinearForm = typename LhsPenalty::BilinearForm;
+        using LhsLinearForm = typename LhsPenalty::LinearForm;
+        fdapde_static_assert(
+          internals::is_valid_penalty_pair_v<LhsBilinearForm FDAPDE_COMMA LhsLinearForm>, INVALID_PENALTY_DESCRIPTION);
+        const LhsPenalty& penalty1 = penalty.lhs_penalty();
+        using RhsPenalty = typename std::decay_t<Penalty>::RhsPenalty;
+        using RhsBilinearForm = typename RhsPenalty::BilinearForm;
+        using RhsLinearForm = typename RhsPenalty::LinearForm;
+        fdapde_static_assert(
+          internals::is_valid_penalty_pair_v<RhsBilinearForm FDAPDE_COMMA RhsLinearForm>, INVALID_PENALTY_DESCRIPTION);
+        const RhsPenalty& penalty2 = penalty.rhs_penalty();
+	
+        using FunctionSpaces = typename function_space_tuple<std::tuple<LhsBilinearForm, RhsBilinearForm>>::type;
+        using FS1 = std::tuple_element_t<0, FunctionSpaces>;
+        using FS2 = std::tuple_element_t<1, FunctionSpaces>;
+        // one penalty must be on a FeSpace
+        fdapde_static_assert(is_fe_space_v<FS1> || is_fe_space_v<FS2>, NO_FINITE_ELEMENT_SPACE_DETECTED);
+        constexpr int fe_space_index = is_fe_space_v<FS1> ? 0 : 1;
+        constexpr int bs_space_index = is_fe_space_v<FS1> ? 1 : 0;
+        using BsSpace = std::tuple_element_t<bs_space_index, FunctionSpaces>;
+        // we enforce a space-time (or SpaceMajor) expansion of the field by reordering the forms so that, index 0
+        // always refer to the spatial finite element discretization
+        const auto& fe_penalty = fe_penalty_(penalty1, penalty2);
+        const auto& bs_penalty = bs_penalty_(penalty1, penalty2);
+        // get references to bilinear and linear forms
+        auto bilinear_form = std::tie(fe_penalty.bilinear_form(), bs_penalty.bilinear_form());
+        auto linear_form = std::tie(fe_penalty.linear_form(), bs_penalty.linear_form());
+        {
+            const BsSpace& bs_space = std::get<bs_space_index>(bilinear_form).trial_space();
+            fdapde_assert(bs_space.sobolev_regularity() > 1);
+        }
+        // discretization
+        auto assemble_ = [&, this]<int Index>() {
+            auto& space = std::get<Index>(bilinear_form).trial_space();
+            // assemble mass matrix
+            TrialFunction u(space);
+            TestFunction  v(space);
+            R0__[Index] = integral(space.triangulation())(u * v).assemble();
+            R1__[Index] = std::get<Index>(bilinear_form).assemble();
+        };
+        assemble_.template operator()<0>();
+        assemble_.template operator()<1>();	
+        // tensorization
+        R0_ = kronecker(R0__[1], R0__[0]);   // R0_T \kron R0_D
+        R1_ = kronecker(R0__[1], R1__[0]);   // R0_T \kron R1_D
+        K_  = kronecker(R1__[1], R0__[0]);   // R1_T \kron R0_D	
+        // number of basis functions on physical domain
+        n_dofs__[0] = std::get<0>(bilinear_form).trial_space().n_dofs();
+        n_dofs__[1] = std::get<1>(bilinear_form).trial_space().n_dofs();
+        n_dofs_ = n_dofs__[0] * n_dofs__[1];
+        // forcing discretization
+        u_.resize(n_dofs_);
+        {
+            vector_t u = std::get<0>(linear_form).assemble();
+            for (int i = 0; i < n_dofs__[1]; ++i) { u_.segment(i * n_dofs__[0], n_dofs__[0]) = u; }
+        }
+        // store handlers for basis system evaluation at locations
+        internals::for_each_index_in_pack<2>(
+          [&]<int Ns>() {
+              point_eval_[Ns] = [fe_space =
+                                   std::get<Ns>(bilinear_form).trial_space()](const matrix_t& locs) -> decltype(auto) {
+                  return internals::point_basis_eval(fe_space, locs);
+              };
+              areal_eval_[Ns] = [fe_space =
+                                   std::get<Ns>(bilinear_form).trial_space()](const binary_t& locs) -> decltype(auto) {
+                  return internals::areal_basis_eval(fe_space, locs);
+              };
+          });
+        b_[0].resize(2 * n_dofs_, 1); 
+        return;
+    }
+    // non-parametric fit
+    // \sum_i w_i * (y_i - f(p_i))^2 + \int_D (Lf - u)^2
+    template <typename DataLocs1, typename DataLocs2, typename WeightMatrix>
+        requires(is_valid_data_locs_descriptor_v<DataLocs1> && is_valid_data_locs_descriptor_v<DataLocs2>)
+    void analyze_data(const DataLocs1& locs1, const DataLocs2& locs2, const matrix_t& y, const WeightMatrix& W) {
+        fdapde_assert(
+          locs1.rows() > 0 && locs2.rows() > 0 && y.rows() == locs1.rows() * locs2.rows() && y.cols() == 1 &&
+          W.rows() == locs1.rows() * locs2.rows() && W.rows() == W.cols());
+        n_obs_[0]  = y.rows();
+	n_locs_ = n_obs_[0];
+        n_covs_ = 0;
+        eval_basis_at_(locs1, locs2);   // update \Psi matrix
+        update_response_and_weights(0,y, W);
+        return;
+    }
+    // semi-parametric fit
+    // \sum_i w_i * (y_i - x_i^\top * \beta - f(p_i))^2 + \int_D (Lf - u)^2
+    template <typename DataLocs1, typename DataLocs2, typename WeightMatrix>
+        requires(is_valid_data_locs_descriptor_v<DataLocs1> && is_valid_data_locs_descriptor_v<DataLocs2>)
+    void analyze_data(
+      const DataLocs1& locs1, const DataLocs2& locs2, const matrix_t& y, const matrix_t& X, const WeightMatrix& W) {
+        fdapde_assert(
+          locs1.rows() > 0 && locs2.rows() > 0 && y.rows() == locs1.rows() * locs2.rows() && y.cols() == 1 &&
+          X.rows() == locs1.rows() * locs2.rows() && W.rows() == locs1.rows() * locs2.rows() && W.rows() == W.cols());
+        n_obs_[0]  = y.rows();
+	n_locs_ = n_obs_[0];
+        bool require_woodbury_realloc = std::cmp_not_equal(n_covs_, X.cols());
+        n_covs_ = X.cols();
+        eval_basis_at_(locs1, locs2);   // update \Psi matrix
+        if (require_woodbury_realloc) { U_[0] = matrix_t::Zero(2 * n_dofs_, n_covs_); }
+        if (require_woodbury_realloc) { V_[0] = matrix_t::Zero(n_covs_, 2 * n_dofs_); }
+        update_response_and_weights(0,y, X, W);
+        return;
+    }
+    // fit from formula
+    template <typename GeoFrame, typename WeightMatrix>
+    void analyze_data(const std::string& formula, const GeoFrame& gf, const WeightMatrix& W) {
+        fdapde_static_assert(GeoFrame::Order == 2, THIS_CLASS_IS_FOR_ORDER_TWO_GEOFRAMES_ONLY);
+        fdapde_assert(gf.n_layers() == 1);
+        n_obs_[0]  = gf[0].rows();
+        n_locs_ = n_obs_[0];
+        eval_basis_at_(gf);   // update \Psi matrix
+        // parse formula, extract response vector and design matrix
+        Formula formula_(formula);
+        std::vector<std::string> covs;
+        for (const std::string& token : formula_.rhs()) {
+            if (gf.contains(token)) { covs.push_back(token); }
+        }
+        bool require_woodbury_realloc = std::cmp_not_equal(n_covs_, covs.size());
+        n_covs_ = covs.size();
+        const auto& y_data = gf[0].data().template col<double>(formula_.lhs());
+        y_[0].resize(n_locs_, y_data.blk_sz());
+        y_data.assign_to(y_[0]);
+
+        if (b_[0].cols() != y_[0].cols()) {
+            b_[0].resize(2 * n_dofs_, y_[0].cols()); //solo worker0 perché solo in costruzione
+        }
+        if (n_covs_ != 0) {
+            if (require_woodbury_realloc) { U_[0] = matrix_t::Zero(2 * n_dofs_, n_covs_); }
+            if (require_woodbury_realloc) { V_[0] = matrix_t::Zero(n_covs_, 2 * n_dofs_); }
+            X_.resize(n_locs_, n_covs_);   // assemble design matrix
+            for (int i = 0; i < n_covs_; ++i) { gf[0].data().template col<double>(covs[i]).assign_to(X_.col(i)); }
+        }
+        update_response_and_weights(0,y_[0], W);   // updates design_matrix releated matrices as well
+        return;
+    }
+
+    // modifiers
+    void update_response(int worker_id, const vector_t& y) {
+        fdapde_assert(Psi_.rows() > 0 && y.rows() == Psi_.rows() && y.cols() == 1);
+        y_[worker_id] = y;
+        // correct \Psi for missing observations
+        auto nan_pattern = na_matrix(y);
+        int old_n_obs = n_obs_[worker_id];
+        if (nan_pattern.any()) {
+            n_obs_[worker_id] = n_locs_ - nan_pattern.count();
+            B_[worker_id] = (~nan_pattern).repeat(1, n_dofs_).select(Psi_, 0);
+            y_[worker_id] = (~nan_pattern).select(y_[worker_id], 0);
+        }
+        if (old_n_obs != n_obs_[worker_id]) { W_[worker_id] *= (double)old_n_obs / n_obs_[worker_id]; }
+        b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];
+        return;
+    }
+    template <typename WeightMatrix> void update_weights(int worker_id, const WeightMatrix& W) {
+        fdapde_assert(Psi_.rows() > 0 && W.rows() == n_locs_ && W.rows() == W.cols());
+        W_[worker_id] = W;
+	W_[worker_id] /= n_obs_[worker_id];
+        if (n_covs_ == 0) {
+            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];    
+        } else {
+            XtWX_[worker_id] = X_.transpose() * W_[worker_id] * X_;
+            invXtWX_[worker_id] = XtWX_[worker_id].partialPivLu();
+            invXtWXXtW_[worker_id] = invXtWX_[worker_id].solve(X_.transpose() * W_[worker_id]);   // (X^\top * W * X)^{-1} * (X^\top * W)
+            // woodbury decomposition matrices
+            U_[worker_id].block(0, 0, n_dofs_, n_covs_) = PsiNA(worker_id).transpose() * D_ * W_[worker_id] * X_;
+            V_[worker_id].block(0, 0, n_covs_, n_dofs_) = X_.transpose() * W_[worker_id] * PsiNA(worker_id);
+            b_[worker_id].block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], y_[worker_id]);
+        }
+        W_changed_[worker_id] = true;
+	return;
+    }
+    template <typename WeightMatrix> void update_response_and_weights(int worker_id, const vector_t& y, const WeightMatrix& W) {
+        fdapde_assert(
+          Psi_.rows() > 0 && y.rows() == n_locs_ && y.cols() == 1 && W.rows() == W.cols() && W.rows() == n_locs_);
+        y_[worker_id] = y;
+        // correct \Psi for missing observations
+        auto nan_pattern = na_matrix(y);
+        if (nan_pattern.any()) {
+            n_obs_[worker_id] = n_locs_ - nan_pattern.count();
+            B_[worker_id] = (~nan_pattern).repeat(1, n_dofs_).select(Psi_, 0);
+            y_[worker_id] = (~nan_pattern).select(y_[worker_id], 0);
+        }
+        update_weights(worker_id, W);
+        return;
+    }
+
+    // main fit entry point
+    std::pair<vector_t, vector_t> fit(int worker_id, double lambda_D, double lambda_T) {
+        fdapde_assert(lambda_D > 0 && lambda_T > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
+	std::array<double, n_lambda> lambda {lambda_D, lambda_T};
+        if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
+            // assemble and factorize system matrix for nonparameteric part
+            SparseBlockMatrix<double, 2, 2> A(
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id) - lambda_T * K_, lambda_D * R1_.transpose(), lambda_D * R1_,
+              lambda_D * R0_);
+            invA_[worker_id].compute(A);
+            W_changed_[worker_id] = false;
+        }
+        if (lambda_saved_[worker_id].value() != lambda) {
+            // linear system rhs
+            b_[worker_id].block(n_dofs_, 0, n_dofs_, 1) = lambda_D * u_;
+        }
+	lambda_saved_[worker_id] = lambda;
+        vector_t x;
+        if (n_covs_ == 0) { 
+            x = invA_[worker_id].solve(b_[worker_id]);
+            f_[worker_id] = x.topRows(n_dofs_);
+        } else {   // parametric case // per ora solo n_cons == 0
+            x = woodbury_system_solve(invA_[worker_id], U_[worker_id], XtWX_[worker_id], V_[worker_id], b_[worker_id]);
+            f_[worker_id] = x.topRows(n_dofs_);
+            beta_[worker_id] = invXtWXXtW_[worker_id] * (y_[worker_id] - Psi_ * f_[worker_id]);
+        } 
+        g_[worker_id] = x.bottomRows(n_dofs_);
+        return std::make_pair(f_[worker_id], beta_[worker_id]);
+    }
+    template <typename LambdaT>
+        requires(internals::is_vector_like_v<LambdaT>)
+    std::pair<vector_t, vector_t> fit(int worker_id, LambdaT&& lambda) {
+        fdapde_assert(lambda.size() == n_lambda);
+        return fit(worker_id, lambda[0], lambda[1]);
+    }
+    // perform a nonparametric_fit, e.g. discarding possible covariates
+    vector_t nonparametric_fit(int worker_id, double lambda_D, double lambda_T) {
+        fdapde_assert(lambda_D > 0 && lambda_T > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
+        std::array<double, n_lambda> lambda {lambda_D, lambda_T};
+        if (lambda_saved_[worker_id].value() != lambda) {
+            // assemble and factorize system matrix for nonparameteric part
+            SparseBlockMatrix<double, 2, 2> A(
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id) - lambda_T * K_, lambda_D * R1_.transpose(), lambda_D * R1_,
+              lambda_D * R0_);
+            invA_[worker_id].compute(A);
+        }
+        vector_t x;
+        if (n_covs_ == 0) {   // equivalent to calling fit(lambda)
+            if (lambda_saved_[worker_id].value() != lambda) { b_[worker_id].block(n_dofs_, 0, n_dofs_, 1) = lambda_D * u_; }
+            x = invA_[worker_id].solve(b_[worker_id]);
+        } else {
+            vector_t b(2 * n_dofs_);
+            // assemble nonparametric linear system rhs
+            b.block(0, 0, n_dofs_, 1) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * y_[worker_id];
+            b.block(n_dofs_, 0, n_dofs_, 1) = lambda_D * u_;   
+            x = invA_[worker_id].solve(b);
+        }
+        lambda_saved_[worker_id] = lambda;
+        f_[worker_id] = x.topRows(n_dofs_);
+        g_[worker_id] = x.bottomRows(n_dofs_);
+        return f_[worker_id];
+    }
+
+    // hutchinson approximation for Tr[S]
+    double edf(int r = 100, int seed = random_seed, int worker_id = 0) {
+        fdapde_assert(lambda_saved_[worker_id].has_value());
+        if (!Ys_[worker_id].has_value() || !Bs_[worker_id].has_value()) {
+            int seed_ = (seed == random_seed) ? std::random_device()() : seed;
+            std::mt19937 rng(seed_);
+            rademacher_distribution rademacher;
+            Us_[worker_id] = matrix_t(n_locs_, r); //Us_[worker_id]->resize(n_locs_, r); da segmentation fault in sequenziale 
+            for (int i = 0; i < n_locs_; ++i) {
+                for (int j = 0; j < r; ++j) { Us_[worker_id]->operator()(i, j) = rademacher(rng); }
+            }         
+            Ys_[worker_id] = Us_[worker_id]->transpose() * Psi_;
+            Bs_[worker_id] = matrix_t::Zero(2 * n_dofs_, r);   // implicitly enforce homogeneous forcing
+        }
+        if (n_covs_ == 0) {
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * (*Us_[worker_id]);
+        } else {
+            Bs_[worker_id]->topRows(n_dofs_) = -PsiNA(worker_id).transpose() * D_ * internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], *Us_[worker_id]);
+        }
+
+        matrix_t x = n_covs_ == 0 ? invA_[worker_id].solve(*Bs_[worker_id]) : woodbury_system_solve(invA_[worker_id], U_[worker_id], XtWX_[worker_id], V_[worker_id], *Bs_[worker_id]);
+
+        double trS = 0;   // monte carlo Tr[S] approximation
+        for (int i = 0; i < r; ++i) { trS += Ys_[worker_id]->row(i).dot(x.col(i).head(n_dofs_)); }
+        return trS / r;
+    }
+    template <typename... LambdaT>
+        requires(
+          (sizeof...(LambdaT) == 1 && (internals::is_vector_like_v<LambdaT> && ...)) ||
+          (sizeof...(LambdaT) == n_lambda && (std::is_floating_point_v<LambdaT> && ...)))
+    double edf(const LambdaT&... lambda, int r = 100, int seed = random_seed, int worker_id = 0) {
+        std::array<double, n_lambda> lambda_;
+        if constexpr (sizeof...(LambdaT) == 1) {
+            internals::for_each_index_and_args<sizeof...(LambdaT)>([&]<int Ns_, typename Ts_>(const Ts_& ts) {
+                fdapde_assert(ts.size() == n_lambda && ts[0] > 0 && ts[1] > 0);
+                lambda_[0] = ts[0];
+                lambda_[1] = ts[1];
+            });
+        } else {
+            std::array<double, n_lambda> lambda__ {static_cast<double>(lambda)...};
+            fdapde_assert(lambda__[0] > 0 && lambda__[1] > 0);
+            lambda_[0] = lambda__[0];
+	    lambda_[1] = lambda__[1];
+        }
+        if (lambda_saved_[worker_id].value() != lambda_) {
+            SparseBlockMatrix<double, 2, 2> A(
+              -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id) - lambda_[1] * K_, lambda_[0] * R1_.transpose(),
+              lambda_[0] * R1_, lambda_[0] * R0_);
+            invA_[worker_id].compute(A);
+            lambda_saved_[worker_id] = lambda_;
+        }
+        return edf(r, seed, worker_id);
+    }
+    // penalty matrix: \lambda_D * R0_T \kron (R1_D^\top * R0_D^{-1} * R1_D) + \lambda_T * R1_T \kron R0_D
+    matrix_t P(double lambda_D, double lambda_T) const {
+        if (!PT_.has_value()) { PT_ = kronecker(R1__[1], R0__[0]); }
+        if (!PD_.has_value()) {
+            sparse_solver_t invR0;
+            invR0.compute(R0__[0]);
+            PD_ = kronecker(R0__[1], R1__[0].transpose() * invR0.solve(R1__[0]));
+        }
+        return lambda_D * (*PD_) + lambda_T * (*PT_);
+    }
+    template <typename LambdaT>
+        requires(internals::is_vector_like_v<LambdaT>)
+    matrix_t P(const LambdaT& lambda) const {
+        fdapde_assert(lambda.size() == n_lambda);
+        return P(lambda[0], lambda[1]);
+    }
+    matrix_t P() const { return P(1.0, 1.0); }
+    double ftPf(int worker_id, double lambda_D, double lambda_T) {
+        if (std::array<double, n_lambda> {lambda_D, lambda_T} != lambda_saved_[worker_id] || W_changed_[worker_id]) {
+std::cout<<"worker"<<worker_id<<" dentro if ftps"<<std::endl;
+            fit(worker_id, lambda_D, lambda_T);
+        }
+
+        return f_[worker_id].dot(P(lambda_D, lambda_T) * f_[worker_id]);
+    }
+    template <typename LambdaT>
+        requires(internals::is_vector_like_v<LambdaT>)
+    double ftPf(int worker_id, const LambdaT& lambda) {
+        fdapde_assert(lambda.size() == n_lambda);
+std::cout<<"worker"<<worker_id<<" ftps vector"<<std::endl;
+        return internals::apply_index_pack<n_lambda>([&]<int... Ns>() { 
+std::cout<<"worker"<<worker_id<<" dentro apply ftPs vect"<<std::endl;
+            return ftPf(worker_id, lambda[Ns]...); });
+    }
+    vector_t lmbPsi(const vector_t& rhs) const { return Psi_ * rhs; }
+    vector_t fn(int worker_id = 0) const { return Psi_ * f_[worker_id]; }
+
+    // observers
+    int n_dofs() const { return n_dofs_; }
+    const sparse_matrix_t& mass() const { return R0_; }
+    const sparse_matrix_t& stiff() const { return R1_; }
+    const sparse_matrix_t& Psi() const { return Psi_; }
+    const sparse_matrix_t& PsiNA(int worker_id) const { return B_[worker_id].has_value() ? *B_[worker_id] : Psi_; }
+    const vector_t& force() const { return u_; }
+    const vector_t& f(int worker_id = 0) const { return f_[worker_id]; }
+    const vector_t& beta(int worker_id = 0) const { return beta_[worker_id]; }
+    const vector_t& misfit(int worker_id = 0) const { return g_[worker_id]; }
+    const matrix_t& design_matrix() const { return X_; }
+    const vector_t& response(int worker_id) const { return y_[worker_id]; }
+
+    void prepara_per_parallelo(){// vettori di dati non thread-safe sono dim = 1, questo li rende dimensione = n_worker copiando elemento0
+        n_worker = singleton_threadpool::instance().n_workers();
+        // ridimensiona tutti i container a n_worker
+        lambda_saved_.resize(n_worker);
+        invA_.resize(n_worker);
+        b_.resize(n_worker);
+        Ys_.resize(n_worker);
+        Bs_.resize(n_worker);
+        Us_.resize(n_worker);
+        f_.resize(n_worker);
+        beta_.resize(n_worker);
+        g_.resize(n_worker);
+        W_changed_.resize(n_worker);
+
+        y_.resize(n_worker);
+        n_obs_.resize(n_worker);
+        B_.resize(n_worker);
+        W_.resize(n_worker);
+        U_.resize(n_worker);
+        V_.resize(n_worker);
+        invXtWXXtW_.resize(n_worker);
+        invXtWX_.resize(n_worker);
+        XtWX_.resize(n_worker);
+        // copia lo stato del worker 0 sugli altri, solo dei dati che sono inizializzati 
+        for (int i = 1; i < n_worker; ++i) {
+            lambda_saved_[i] = lambda_saved_[0];
+            b_[i]            = b_[0];
+            W_changed_[i]    = W_changed_[0];
+            n_obs_[i]        = n_obs_[0];
+            U_[i]            = U_[0];
+            V_[i]            = V_[0];
+        }
+    }
+
+   protected:
+    std::vector<std::optional<std::array<double, n_lambda>>> lambda_saved_ = std::vector<std::optional<std::array<double, n_lambda>>>(1, std::array<double, n_lambda>{-1, -1});
+    std::vector<sparse_solver_t> invA_ = std::vector<sparse_solver_t>(1);
+    std::vector<matrix_t> b_ = std::vector<matrix_t>(1);
+    // matrices for hutchinson stochastic estimation of Tr[S]
+    std::vector<std::optional<matrix_t>> Ys_ = std::vector<std::optional<matrix_t>>(1);
+    std::vector<std::optional<matrix_t>> Bs_ = std::vector<std::optional<matrix_t>>(1);
+    std::vector<std::optional<matrix_t>> Us_ = std::vector<std::optional<matrix_t>>(1);
+
+    int n_dofs_ = 0, n_locs_ = 0, n_covs_ = 0;
+    std::vector<int> n_obs_ = std::vector<int> (1,0);
+    // not tensorized quantities
+    std::array<int, 2> n_dofs__;           // number of spatial and temporal degrees of freedom {n_dofs_D, n_dofs_T}
+    std::array<sparse_matrix_t, 2> R0__;   // {R0_D, R0_T} = { \int_D \psi_i * \psi_j, \int_T \phi_i * \phi_j }
+    std::array<sparse_matrix_t, 2> R1__;   // {R1_D, R1_T} = { \int_D a_D(\psi_i, \psi_j), \int_T a_T(\phi_T, \phi_D) }
+
+    sparse_matrix_t R0_;    // n_dofs x n_dofs matrix R0 = R0_T \kron R0_D
+    sparse_matrix_t R1_;    // n_dofs x n_dofs matrix R1 = R0_T \kron R1_D
+    sparse_matrix_t K_;     // n_dofs x n_dofs matrix  K = R1_T \kron R0_D
+    sparse_matrix_t Psi_;   // n_obs x n_dofs matrix Psi = Psi_T \kron Psi_D
+    vector_t u_;            // (n_dofs_D * n_dofs_T) x 1 vector u = [u_1 \ldots u_n, \ldots, u_1 \ldots u_n]
+    diag_matrix_t D_;       // vector of regions' measures (areal sampling)
+    mutable sparse_solver_t invR0_;
+    std::vector<std::optional<sparse_matrix_t>> B_ = std::vector<std::optional<sparse_matrix_t>>(1);            // \Psi matrix corrected for missing observations
+    mutable std::optional<sparse_matrix_t> PD_;   // matrix PD = R0_T \kron (R1_D^\top * R0_D^{-1} * R1_D)
+    mutable std::optional<sparse_matrix_t> PT_;   // matrix PT = R1_T \kron R0_D
+    std::vector<vector_t> f_ = std::vector<vector_t>(1); 
+    std::vector<vector_t> beta_ = std::vector<vector_t>(1); 
+    std::vector<vector_t> g_ = std::vector<vector_t>(1);
+    // basis system evaluation handles
+    std::array<std::function<sparse_matrix_t(const matrix_t& locs)>, n_lambda> point_eval_;
+    std::array<std::function<std::pair<sparse_matrix_t, vector_t>(const binary_t& locs)>, n_lambda> areal_eval_;
+
+    matrix_t X_;               // n_obs x n_covs design matrix
+    std::vector<vector_t> y_ = std::vector<vector_t>(1);               // n_obs x 1 observation vector
+    std::vector<sparse_matrix_t> W_ = std::vector<sparse_matrix_t>(1);        // n_obs x n_obs matrix of observation weights
+    std::vector<matrix_t> V_ = std::vector<matrix_t>(1);           // (2 * n_dofs) x n_covs matrices [\Psi^\top * D * W * y, 0] and [X^\top * W * \Psi, 0] // poi da fare vettori per rendere thread-safe anche caso n_covs != 0
+    std::vector<matrix_t> U_ = std::vector<matrix_t>(1);
+    std::vector<matrix_t> XtWX_ = std::vector<matrix_t>(1);            // n_covs x n_covs matrix X^\top * W * X  
+    std::vector<dense_solver_t> invXtWX_ = std::vector<dense_solver_t>(1);   // factorization of n_covs x n_covs matrix X^\top * W * X
+    std::vector<matrix_t> invXtWXXtW_ = std::vector<matrix_t>(1);      // n_covs x n_obs matrix (X^\top * X)^{-1} * (X^\top * W)
+    std::vector<bool> W_changed_ = std::vector<bool>(1);
+};
+
 // central difference time integration loop
 class fe_ls_separable_cdti {
    private:
@@ -1096,6 +1668,44 @@ struct fe_ls_separable_mono {
     };
    public:
     fe_ls_separable_mono(const Penalty&... penalty) : penalty_(penalty...) { }
+    const penalty_packet& get() const { return penalty_; }
+   private:
+    penalty_packet penalty_;
+};
+
+// separable solver API
+// monolithic method
+template <typename... Penalty>
+    requires(sizeof...(Penalty) == 2 && (internals::is_pair_v<Penalty> && ...))
+struct fe_ls_separable_mono_gsr {
+    using solver_t = internals::fe_ls_separable_mono_gsr;
+   private:
+    struct penalty_packet {
+        template <typename Penalty_> struct penalty_bit {
+            using BilinearForm = std::tuple_element_t<0, std::decay_t<Penalty_>>;
+            using LinearForm = std::tuple_element_t<1, std::decay_t<Penalty_>>;
+           private:
+            BilinearForm bilinear_form_;
+            LinearForm linear_form_;
+           public:
+            penalty_bit(const Penalty_& penalty) :
+                bilinear_form_(std::get<0>(penalty)), linear_form_(std::get<1>(penalty)) { }
+            // observers
+            const BilinearForm& bilinear_form() const { return bilinear_form_; }
+            const LinearForm& linear_form() const { return linear_form_; }
+        };
+        using LhsPenalty = penalty_bit<std::tuple_element_t<0, std::tuple<Penalty...>>>;
+        using RhsPenalty = penalty_bit<std::tuple_element_t<1, std::tuple<Penalty...>>>;
+
+        penalty_packet(const Penalty&... penalty) : penalty_(penalty...) { }
+        // observers
+        const LhsPenalty& lhs_penalty() const { return std::get<0>(penalty_); }
+        const RhsPenalty& rhs_penalty() const { return std::get<1>(penalty_); }
+       private:
+        std::tuple<penalty_bit<Penalty>...> penalty_;
+    };
+   public:
+    fe_ls_separable_mono_gsr(const Penalty&... penalty) : penalty_(penalty...) { }
     const penalty_packet& get() const { return penalty_; }
    private:
     penalty_packet penalty_;

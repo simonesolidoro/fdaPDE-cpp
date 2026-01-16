@@ -97,13 +97,14 @@ template <typename VariationalSolver> class QSRPDE {
             py_[worker_id] = y - (1 - 2. * alpha) * abs_res;	  
             // \argmin_{\beta, f} [ 1/n * \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
-        std::cout<<"model :"<<lambda<<std::endl;
+std::cout<<"model: wid"<<worker_id<< " lamda:";
+((std::cout << args << " "), ...);    
             solver_.fit(worker_id,std::forward<Args>(args)...);
             mu_[worker_id] = fitted(worker_id);
             // prepare for next iteration
             double data_loss = (pW_[worker_id].cwiseSqrt().matrix().asDiagonal() * (py_[worker_id] - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
-            Jnew = data_loss + solver_.ftPf(lambda, worker_id);
+            Jnew = data_loss + solver_.ftPf(worker_id, lambda);
             n_iter_++;
         }
 	return std::make_pair(solver_.f(worker_id), solver_.beta(worker_id));
@@ -152,6 +153,7 @@ template <typename VariationalSolver> class QSRPDE {
         template <typename InputType_>
             requires(internals::is_subscriptable<InputType_, int>)
         constexpr double operator()(const InputType_& lambda) {
+            std::cout<<"WORKER"<<singleton_threadpool::instance().index_worker()<<std::endl;
             return internals::apply_index_pack<n_lambda>([&]<int... Ns_>() { return operator()(lambda[Ns_]...); });
         }
         template <typename... LambdaT>
@@ -172,6 +174,8 @@ template <typename VariationalSolver> class QSRPDE {
                 } 
             //esecuzione parallela
             int worker_id = singleton_threadpool::instance().index_worker();
+            if( worker_id == 0){std::cout<<"zero"<<std::endl;}
+            std::cout<<" gcv_da_wid"<<worker_id<<std::endl;
             model_->fit(worker_id,static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
             if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]

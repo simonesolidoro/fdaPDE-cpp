@@ -814,18 +814,12 @@ struct fe_ls_elliptic_gsr {
 
     // main fit entry point
     std::pair<vector_t, vector_t> fit(int worker_id, double lambda) {
-        //std::cout<<"wid: "<<worker_id<<" n_obs_[wid]:"<<n_obs_[worker_id]<<std::endl;
-        std::cout<<"solver :"<<lambda<<std::endl;
-        if(lambda >= 1 || lambda == 0){lambda = 0.000177828;
-            worker_id = singleton_threadpool::instance().index_worker();
-            std::ofstream out("if_log.txt", std::ios::app);
-            out << "ca,biato lambda:\n";
-        }// correzione bug forzata per vedere se ci sono altri problemi 
+
+        std::cout<<"solver :"<<lambda<<" wid:"<<worker_id<<std::endl;
+
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part
-//std::cout<<"thread:"<<std::this_thread::get_id()<<" ricalcola invA"<<std::endl;
-//std::cout<<W_[worker_id].rows()<<"x"<<W_[worker_id].cols()<<"  "<<PsiNA(worker_id).rows()<<"x"<<PsiNA(worker_id).cols()<<std::endl;
             SparseBlockMatrix<double, 2, 2> A(
               -PsiNA(worker_id).transpose() * D_ * W_[worker_id] * PsiNA(worker_id), lambda * R1_.transpose(), lambda * R1_, lambda * R0_);
 	    enforce_lhs_dirichlet_bc_(A);
@@ -840,7 +834,6 @@ struct fe_ls_elliptic_gsr {
         lambda_saved_[worker_id] = lambda;
         vector_t x;
         if (n_covs_ == 0) {
-//std::cout<<"thread:"<<std::this_thread::get_id()<<" solve"<<std::endl;
             x = invA_[worker_id].solve(b_[worker_id]);
             f_[worker_id] = x.topRows(n_dofs_);
         } else {
@@ -956,19 +949,19 @@ struct fe_ls_elliptic_gsr {
         return lambda * R1_.transpose() * invR0.solve(R1_);
     }
     // efficient evaluation of f^\top * P * f = g^\top * R0 * g
-    double ftPf(double lambda, int worker_id = 0) {
-        if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) { fit(lambda,worker_id); }
+    double ftPf(int worker_id, double lambda) {
+        if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) { fit(worker_id,lambda); }
         return lambda * g_[worker_id].dot(R0_ * g_[worker_id]);
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT>)
-    double ftPf(const LambdaT& lambda, int worker_id = 0) {
+    double ftPf(int worker_id, const LambdaT& lambda) {
         fdapde_assert(lambda.size() == n_lambda);
-        return ftPf(lambda[0],worker_id);
+        return ftPf(worker_id, lambda[0]);
     }
     // left multiplication by \Psi
     vector_t lmbPsi(const vector_t& rhs) const { return Psi_ * rhs; }
-    vector_t fn(int worker_id = 0) const { return Psi_ * f_[worker_id]; }
+    vector_t fn(int worker_id) const { return Psi_ * f_[worker_id]; }
     matrix_t Q(int worker_id) const { return internals::lmbQ(W_[worker_id], X_, invXtWX_[worker_id], matrix_t::Identity(n_locs_, n_locs_)); }
 
     // observers

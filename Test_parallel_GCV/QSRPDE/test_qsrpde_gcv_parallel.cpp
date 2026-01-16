@@ -47,7 +47,7 @@ int main() {
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();
-    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,granularity);
+    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
     std::cout<<duration.count()<<" ";

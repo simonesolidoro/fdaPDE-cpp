@@ -226,12 +226,11 @@ class GSRPDE {
         pW_.resize(n_worker_);
         distr_.resize(n_worker_);
         transform_.resize(n_worker_);
-        for (int i = 1; i<n_worker_; i++){
-            // distr_[i] = std::make_shared<fdapde::poisson_distribution> (); // per il mometo hard-coded poisson solo per capire se prolema di data race era distr_
-            // transform_[i] = transform_[0]; 
-            auto p0 = std::dynamic_pointer_cast<fdapde::poisson_distribution>(distr_[0]);
-            fdapde_assert(p0 && "distr_[0] is not poisson_distribution");
-            distr_[i] = std::make_shared<fdapde::poisson_distribution>(*p0); //
+        for (int i = 1; i<n_worker_; i++){ 
+            // auto p0 = std::dynamic_pointer_cast<fdapde::poisson_distribution>(distr_[0]);
+            // fdapde_assert(p0 && "distr_[0] is not poisson_distribution");
+            // distr_[i] = std::make_shared<fdapde::poisson_distribution>(*p0); //
+            distr_[i] = distr_[0]->clone();
             transform_[i] = transform_[0];
 
         }   

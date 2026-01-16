@@ -108,6 +108,10 @@ class simd_distribution {
     virtual matrix_t der_link(const matrix_t& x) const = 0;
     virtual double   deviance(const matrix_t& x, const matrix_t& y) const = 0;
 #endif
+
+//aggiungo metodo clone per poter copiare la distribuzione figlia a partire da uno shared_pointer a padre (simd_distribution)
+// mi serve in thread-safe gsr per poter inizializzare le distr_[worker_id] a partire da distr_[0] che è inizializzata in costruzione.
+    virtual std::shared_ptr<simd_distribution> clone() const = 0;
     virtual ~simd_distribution() = default;
 };
 
@@ -198,6 +202,11 @@ struct bernoulli_distribution : public internals::distribution_base<std::bernoul
         }
     }
     void set_param(param_type p) { p_ = p; }
+
+    //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<bernoulli_distribution> (*this);
+    };
 };
 
 struct rademacher_distribution : public bernoulli_distribution {
@@ -219,6 +228,11 @@ struct rademacher_distribution : public bernoulli_distribution {
     template <typename RandomNumberGenerator> result_type operator()(RandomNumberGenerator& rng) {
         return distr_(rng) ? 1.0 : -1.0;
     }
+
+    //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<rademacher_distribution> (*this);
+    };
 };
 
 struct poisson_distribution : public internals::distribution_base<std::poisson_distribution<int>> {
@@ -293,6 +307,11 @@ struct poisson_distribution : public internals::distribution_base<std::poisson_d
         }
     }
     void set_param(param_type l) { l_ = l; }
+
+    //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<poisson_distribution> (*this);
+    };
 };
 
 struct exponential_distribution : public internals::distribution_base<std::exponential_distribution<double>> {
@@ -352,6 +371,11 @@ struct exponential_distribution : public internals::distribution_base<std::expon
     }
 #endif
     void set_param(param_type l) { l_ = l; }
+
+    //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<exponential_distribution> (*this);
+    };
 };
 
 class gamma_distribution : public internals::distribution_base<std::gamma_distribution<double>> {
@@ -412,6 +436,11 @@ class gamma_distribution : public internals::distribution_base<std::gamma_distri
         k_ = k;
         theta_ = theta;
     }
+
+        //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<gamma_distribution> (*this);
+    };
 };
 
 class normal_distribution : public internals::distribution_base<std::normal_distribution<double>> {
@@ -472,6 +501,11 @@ class normal_distribution : public internals::distribution_base<std::normal_dist
         mu_ = mu;
         sigma_ = sigma;
     }
+
+        //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<normal_distribution> (*this);
+    };
 };
 
 class chi_squared_distribution : public internals::distribution_base<std::chi_squared_distribution<double>> {
@@ -532,6 +566,11 @@ class chi_squared_distribution : public internals::distribution_base<std::chi_sq
     double deviance(const matrix_t& x, const matrix_t& y) const override { return gamma_.deviance(x, y); }
 #endif
     void set_param(param_type n) { n_ = n; }
+
+        //clone per vedi commento in simd_distribution
+    std::shared_ptr<simd_distribution> clone() const override{
+        return std::make_shared<chi_squared_distribution> (*this);
+    };
 };
   
 }   // namespace fdapde

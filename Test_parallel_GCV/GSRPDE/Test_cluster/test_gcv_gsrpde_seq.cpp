@@ -30,12 +30,11 @@ int main() {
         // modeling
         GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic(a, F));
         
-        std::vector<double> lambda_grid(16);
-        for (int i = 0; i < 16; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.05 * i); }
+        std::vector<double> lambda_grid(1600);
+        for (int i = 0; i < 1600; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
         GridSearch<1> optimizer; 
-        int granularity = -1;
         auto start = std::chrono::high_resolution_clock::now();
-        optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,granularity);
+        optimizer.optimize(m.gcv(100, 476813), lambda_grid);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
         std::cout<<duration.count()<<" ";

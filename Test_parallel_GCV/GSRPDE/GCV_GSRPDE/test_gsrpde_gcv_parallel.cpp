@@ -27,9 +27,9 @@ int main() {
     auto F = integral(D)(u * v);
     // modeling
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));
-    
-    std::vector<double> lambda_grid(1200);
-    for (int i = 0; i < 1200; ++i) {lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -6.0); };//lambda_grid[i] = 1.25e-06; }
+
+    std::vector<double> lambda_grid(1600);
+    for (int i = 0; i < 1600; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();
@@ -45,3 +45,10 @@ int main() {
     
 //    EXPECT_TRUE(almost_equal<double>(m.f(), "../../test/data/gsr/01/field.mtx"));
 }
+
+
+/*
+    std::vector<double> lambda_grid(1600);
+    for (int i = 0; i < 1600; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
+risultato: 113530071 ottimo1.699e-06value:0.619794, come sequenziale con tempo 1/3
+*/

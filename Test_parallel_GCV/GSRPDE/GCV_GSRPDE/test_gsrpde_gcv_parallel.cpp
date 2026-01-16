@@ -10,7 +10,8 @@ using namespace fdapde;
 //    BC:           no
 //    order FE:     1
 //    distribution: poisson
-int main() {
+int main(int argc, char** argv) {
+    int size = std::stoi(argv[1]);
     // geometry
     std::string mesh_path = "../../../test/data/mesh/unit_square_40/";
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
@@ -28,8 +29,8 @@ int main() {
     // modeling
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));
 
-    std::vector<double> lambda_grid(1600);
-    for (int i = 0; i < 1600; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
+    std::vector<double> lambda_grid(size);
+    for (int i = 0; i < size; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();

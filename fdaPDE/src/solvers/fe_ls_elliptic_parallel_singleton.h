@@ -22,6 +22,7 @@
 namespace fdapde {
 namespace internals {
 
+//NON THREAD_SAFE SE n_cons != 0
 // solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i)) \|_2^2 + \int_D (Lf - u)^2, L elliptic operator
 struct fe_ls_elliptic {
    private:
@@ -532,7 +533,7 @@ struct fe_ls_elliptic {
     std::vector<bool> W_changed_ = std::vector<bool>(1);
 };
 
-
+//NON THREAD_SAFE SE n_cons != 0
 // solver elliptic per gsr parallel. per ora diviso perché va reso thread-safe update_pesi. una volta che fatto e funziona questo sostituisce altro
 // solves \min_{f, \beta} \| W^{1/2} * (y_i - x_i^\top * \beta - f(p_i)) \|_2^2 + \int_D (Lf - u)^2, L elliptic operator
 struct fe_ls_elliptic_gsr {

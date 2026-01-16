@@ -27,12 +27,12 @@ using namespace fdapde;
 int main(int argc, char** argv) {
     int size = std::stoi(argv[1]);
     // geometry
-    std::string mesh_path = "../../test/data/mesh/unit_square_21/";
+    std::string mesh_path = "../../../test/data/mesh/unit_square_21/";
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
     // data
     GeoFrame data(D);
     auto& l1 = data.insert_scalar_layer<POINT>("l1", MESH_NODES);
-    l1.load_csv<double>("../../test/data/qsr/01/response.csv");
+    l1.load_csv<double>("../../../test/data/qsr/01/response.csv");
     // physics
     FeSpace Vh(D, P1<1>);
     TrialFunction f(Vh);
@@ -58,4 +58,17 @@ int main(int argc, char** argv) {
     std::cout<<"ottimo"<<optimizer.optimum()<<"value:"<<optimizer.value()<<std::endl;
 
  //   EXPECT_TRUE(almost_equal<double>(m.f(), "../data/qsr/01/field.mtx"));
+    std::vector<Eigen::VectorXd> fs;
+    for (int i = 0; i<singleton_threadpool::instance().n_workers(); i++){
+        double lam = optimizer.optimum()(0,0);
+        m.fit(i,lam);
+        fs.push_back(m.f(i));
+    }
+    for (int i = 1; i < fs.size(); ++i) {
+        if (fs[i] == fs[0]) {
+            std::cout << "fs[" << i << "] == fs[0]\n";
+        } else {
+            std::cout << "fs[" << i << "] != fs[0]\n";
+        }
+    }
 }

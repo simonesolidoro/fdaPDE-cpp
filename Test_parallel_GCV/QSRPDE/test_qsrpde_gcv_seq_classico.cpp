@@ -41,14 +41,14 @@ int main(int argc, char** argv) {
     ZeroField<2> u;
     auto F = integral(D)(u * v);
     // modeling
-    QSRPDE m("y ~ f", data, /* alpha = */ 0.1, fe_ls_elliptic_gsr(a, F));
+    QSRPDE m("y ~ f", data, /* alpha = */ 0.1, fe_ls_elliptic(a, F));
     //m.fit(0,/* lambda = */ 1.778279 * std::pow(0.1, 4));
     std::vector<double> lambda_grid(size);
-    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.00+ 0.01*i) * std::pow(0.1, 4); };
+    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.000279+ i) * std::pow(0.1, 7); };
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();
-    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par);
+    optimizer.optimize(m.gcv(100, 476813), lambda_grid);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
     std::cout<<duration.count()<<" ";
@@ -59,3 +59,27 @@ int main(int argc, char** argv) {
 
  //   EXPECT_TRUE(almost_equal<double>(m.f(), "../data/qsr/01/field.mtx"));
 }
+
+/*
+    std::vector<double> lambda_grid(size);
+    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.00+ 0.01*i) * std::pow(0.1, 4); };
+
+    size=120:
+    61277274 ottimo0.0001value:0.0116876
+    58303118 ottimo0.0001value:0.0116876
+
+    size=1200:
+    607332738 ottimo0.0001value:0.0116876
+----------------------------------------------------------------------------------------------------------
+    std::vector<double> lambda_grid(size);
+    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.000279+ 0.001*i) * std::pow(0.1, 4); };
+
+    size = 120:
+    55238866 ottimo0.000100028value:0.0116885
+-----------------------------------------------------------------------------------------------------------
+    std::vector<double> lambda_grid(size);
+    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.000279+ i) * std::pow(0.1, 7); };
+
+    size=120:
+    111174319 ottimo8.00028e-07value:0.0015942
+*/

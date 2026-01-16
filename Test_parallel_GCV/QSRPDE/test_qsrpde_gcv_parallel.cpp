@@ -44,7 +44,12 @@ int main(int argc, char** argv) {
     QSRPDE m("y ~ f", data, /* alpha = */ 0.1, fe_ls_elliptic_gsr(a, F));
     //m.fit(0,/* lambda = */ 1.778279 * std::pow(0.1, 4));
     std::vector<double> lambda_grid(size);
-    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.00+ 0.01*i) * std::pow(0.1, 4); };
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();

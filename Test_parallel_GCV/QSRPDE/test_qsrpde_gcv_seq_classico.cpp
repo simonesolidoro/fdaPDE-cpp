@@ -43,8 +43,14 @@ int main(int argc, char** argv) {
     // modeling
     QSRPDE m("y ~ f", data, /* alpha = */ 0.1, fe_ls_elliptic(a, F));
     //m.fit(0,/* lambda = */ 1.778279 * std::pow(0.1, 4));
+ 
     std::vector<double> lambda_grid(size);
-    for (int i = 0; i < size; ++i) {lambda_grid[i] = (1.000279+ i) * std::pow(0.1, 7); };
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();
@@ -82,4 +88,18 @@ int main(int argc, char** argv) {
 
     size=120:
     111174319 ottimo8.00028e-07value:0.0015942
+---------------------------------------------------------------------------------------------------------------
+    std::vector<double> lambda_grid(size);
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
+
+    ./test_qsrpde_gcv_seq_classico 120
+    48815751 ottimo7.92793e-07value:0.00159556
+    ./test_qsrpde_gcv_seq_classico 120
+    50646398 ottimo7.92793e-07value:0.00159556
+
 */

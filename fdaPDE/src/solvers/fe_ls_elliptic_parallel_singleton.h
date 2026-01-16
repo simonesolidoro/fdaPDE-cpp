@@ -814,9 +814,6 @@ struct fe_ls_elliptic_gsr {
 
     // main fit entry point
     std::pair<vector_t, vector_t> fit(int worker_id, double lambda) {
-
-        std::cout<<"solver :"<<lambda<<" wid:"<<worker_id<<std::endl;
-
         fdapde_assert(lambda > 0 && n_dofs_ > 0 && n_obs_[worker_id] > 0);
         if (lambda_saved_[worker_id].value() != lambda || W_changed_[worker_id]) {
             // assemble and factorize system matrix for nonparameteric part

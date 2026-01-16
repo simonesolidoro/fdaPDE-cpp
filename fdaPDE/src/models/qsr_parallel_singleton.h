@@ -97,8 +97,6 @@ template <typename VariationalSolver> class QSRPDE {
             py_[worker_id] = y - (1 - 2. * alpha) * abs_res;	  
             // \argmin_{\beta, f} [ 1/n * \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
-std::cout<<"model: wid"<<worker_id<< " lamda:";
-((std::cout << args << " "), ...);    
             solver_.fit(worker_id,std::forward<Args>(args)...);
             mu_[worker_id] = fitted(worker_id);
             // prepare for next iteration
@@ -111,9 +109,9 @@ std::cout<<"model: wid"<<worker_id<< " lamda:";
     }
     template <typename... Args> auto fit(int worker_id, Args&&... args) { return fit(worker_id, alpha_, std::forward<Args>(args)...); }
     // observers
-    const vector_t& f(int worker_id) const { return solver_.f(worker_id); }
-    const vector_t& beta(int worker_id) const { return solver_.beta(worker_id); }
-    const vector_t& misfit(int worker_id) const { return solver_.misfit(worker_id); }
+    const vector_t& f(int worker_id = 0) const { return solver_.f(worker_id); }
+    const vector_t& beta(int worker_id = 0) const { return solver_.beta(worker_id); }
+    const vector_t& misfit(int worker_id = 0) const { return solver_.misfit(worker_id); }
     int n_covs() const { return n_covs_; }
     int n_obs() const { return n_obs_; }
     double edf(int r = 100, int seed = random_seed, int worker_id = 0) { return solver_.edf(r, seed, worker_id); }
@@ -153,7 +151,6 @@ std::cout<<"model: wid"<<worker_id<< " lamda:";
         template <typename InputType_>
             requires(internals::is_subscriptable<InputType_, int>)
         constexpr double operator()(const InputType_& lambda) {
-            std::cout<<"WORKER"<<singleton_threadpool::instance().index_worker()<<std::endl;
             return internals::apply_index_pack<n_lambda>([&]<int... Ns_>() { return operator()(lambda[Ns_]...); });
         }
         template <typename... LambdaT>
@@ -174,8 +171,6 @@ std::cout<<"model: wid"<<worker_id<< " lamda:";
                 } 
             //esecuzione parallela
             int worker_id = singleton_threadpool::instance().index_worker();
-            if( worker_id == 0){std::cout<<"zero"<<std::endl;}
-            std::cout<<" gcv_da_wid"<<worker_id<<std::endl;
             model_->fit(worker_id,static_cast<double>(lambda)...);
             std::array<double, StaticInputSize> lambda_vec {lambda...};
             if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]

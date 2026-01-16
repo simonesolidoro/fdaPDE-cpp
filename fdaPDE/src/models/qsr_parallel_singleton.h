@@ -88,8 +88,8 @@ template <typename VariationalSolver> class QSRPDE {
           args...);
         mu_[worker_id] = solver_.Psi() * solver_.f(worker_id);	
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
-        n_iter_ = 0;
-        while (n_iter_ < max_iter_ && std::abs(Jnew - Jold) > tol_) {
+        int n_iter = 0; //sostituito n_iter locale non uso n_iter_ perché mi sembra toomuch fare vector di n_iter_ thread-safe
+        while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
             vector_t abs_res = (y - mu_[worker_id]).array().abs();
             // W_i = 0.5 * (abs_res[i] + tol_weights_) if abs_res[i] < tol_weights, W_i = 0.5 * abs_res[i] otherwise
             pW_[worker_id] = (abs_res.array() < tol_weights_)
@@ -103,7 +103,7 @@ template <typename VariationalSolver> class QSRPDE {
             double data_loss = (pW_[worker_id].cwiseSqrt().matrix().asDiagonal() * (py_[worker_id] - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
             Jnew = data_loss + solver_.ftPf(worker_id, lambda);
-            n_iter_++;
+            n_iter++;
         }
 	return std::make_pair(solver_.f(worker_id), solver_.beta(worker_id));
     }

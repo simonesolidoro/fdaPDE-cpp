@@ -30,7 +30,12 @@ int main(int argc, char** argv) {
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));
 
     std::vector<double> lambda_grid(size);
-    for (int i = 0; i < size; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
     GridSearch<1> optimizer; 
     int granularity = -1;
     auto start = std::chrono::high_resolution_clock::now();
@@ -49,7 +54,13 @@ int main(int argc, char** argv) {
 
 
 /*
-    std::vector<double> lambda_grid(1600);
-    for (int i = 0; i < 1600; ++i) { lambda_grid[i] = (1.00+0.01*i)*std::pow(10, -7.0);  }
-risultato: 113530071 ottimo1.699e-06value:0.619794, come sequenziale con tempo 1/3
+    std::vector<double> lambda_grid(size);
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
+    simo@LAPTOP-P7UDNGNK GCV_GSRPDE $ ./test_gsrpde_gcv_parallel 120
+7616722 ottimo3.13183e-05value:0.553936
 */

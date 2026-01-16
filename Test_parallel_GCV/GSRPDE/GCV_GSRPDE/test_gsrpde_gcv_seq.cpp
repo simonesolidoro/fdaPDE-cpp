@@ -10,7 +10,8 @@ using namespace fdapde;
 //    BC:           no
 //    order FE:     1
 //    distribution: poisson
-int main() {
+int main(int argc, char** argv) {
+    int size = std::stoi(argv[1]);
     // geometry
     std::string mesh_path = "../../../test/data/mesh/unit_square_40/";
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
@@ -28,8 +29,13 @@ int main() {
     // modeling
     GSRPDE m("y ~ f", data, fdapde::poisson_distribution(), fe_ls_elliptic_gsr(a, F));
     
-    std::vector<double> lambda_grid(1200);
-    for (int i = 0; i < 1200; ++i) { lambda_grid[i] = 1.25e-06; };//= std::pow(10, -7.0 + 0.001 * i); }
+    std::vector<double> lambda_grid(size);
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
     GridSearch<1> optimizer; 
     
     auto start = std::chrono::high_resolution_clock::now();
@@ -48,7 +54,14 @@ int main() {
 
 
 /*RISULTATI
-    std::vector<double> lambda_grid(160);
-    for (int i = 0; i < 160; ++i) { lambda_grid[i] = std::pow(10, -7.0 + 0.01 * i); }---> 43995428 ottimo3.89045e-06value:0.588711
-    OK come sequenziale non thread-safe
+    std::vector<double> lambda_grid(size);
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
+
+    simo@LAPTOP-P7UDNGNK GCV_GSRPDE $ ./test_gsrpde_gcv_seq 120
+23314535 ottimo3.13183e-05value:0.553936
 */

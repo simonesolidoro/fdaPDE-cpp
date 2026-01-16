@@ -121,7 +121,7 @@ class GSRPDE {
     int n_covs() const { return n_covs_; }
     int n_obs() const { return n_obs_; }
     double edf(int r = 100, int seed = random_seed, int worker_id = 0) { return solver_.edf(r, seed, worker_id); }
-    const vector_t& response() const { return solver_.response(); }
+    const vector_t& response(int worker_id = 0) const { return solver_.response(worker_id); }
     vector_t fitted(int worker_id = 0) const {
         matrix_t fitted_ = solver_.Psi() * f(worker_id);
         if (n_covs_ != 0) { fitted_ += solver_.design_matrix() * beta(worker_id); }

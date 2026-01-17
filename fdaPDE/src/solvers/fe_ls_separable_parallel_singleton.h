@@ -1030,12 +1030,14 @@ class fe_ls_separable_mono_gsr {
     }
     // penalty matrix: \lambda_D * R0_T \kron (R1_D^\top * R0_D^{-1} * R1_D) + \lambda_T * R1_T \kron R0_D
     matrix_t P(double lambda_D, double lambda_T) const {
+        std::unique_lock<std::mutex> lock(m_solver_);
         if (!PT_.has_value()) { PT_ = kronecker(R1__[1], R0__[0]); }
         if (!PD_.has_value()) {
             sparse_solver_t invR0;
             invR0.compute(R0__[0]);
             PD_ = kronecker(R0__[1], R1__[0].transpose() * invR0.solve(R1__[0]));
         }
+        lock.unlock();
         return lambda_D * (*PD_) + lambda_T * (*PT_);
     }
     template <typename LambdaT>
@@ -1047,19 +1049,15 @@ class fe_ls_separable_mono_gsr {
     matrix_t P() const { return P(1.0, 1.0); }
     double ftPf(int worker_id, double lambda_D, double lambda_T) {
         if (std::array<double, n_lambda> {lambda_D, lambda_T} != lambda_saved_[worker_id] || W_changed_[worker_id]) {
-std::cout<<"worker"<<worker_id<<" dentro if ftps"<<std::endl;
             fit(worker_id, lambda_D, lambda_T);
         }
-
         return f_[worker_id].dot(P(lambda_D, lambda_T) * f_[worker_id]);
     }
     template <typename LambdaT>
         requires(internals::is_vector_like_v<LambdaT>)
     double ftPf(int worker_id, const LambdaT& lambda) {
         fdapde_assert(lambda.size() == n_lambda);
-std::cout<<"worker"<<worker_id<<" ftps vector"<<std::endl;
         return internals::apply_index_pack<n_lambda>([&]<int... Ns>() { 
-std::cout<<"worker"<<worker_id<<" dentro apply ftPs vect"<<std::endl;
             return ftPf(worker_id, lambda[Ns]...); });
     }
     vector_t lmbPsi(const vector_t& rhs) const { return Psi_ * rhs; }
@@ -1113,6 +1111,7 @@ std::cout<<"worker"<<worker_id<<" dentro apply ftPs vect"<<std::endl;
     }
 
    protected:
+    mutable std::mutex m_solver_;
     std::vector<std::optional<std::array<double, n_lambda>>> lambda_saved_ = std::vector<std::optional<std::array<double, n_lambda>>>(1, std::array<double, n_lambda>{-1, -1});
     std::vector<sparse_solver_t> invA_ = std::vector<sparse_solver_t>(1);
     std::vector<matrix_t> b_ = std::vector<matrix_t>(1);

@@ -76,7 +76,6 @@ class GSRPDE {
     //TODO: fit che prende solo args e usa worker_id = 0, per mantenere api come sequenziale
     // Functional penalized iterative reweighted least squares
     template <typename... Args> auto fit(int worker_id,Args&&... args) {
-std::cout<<"worker"<<worker_id<<" inizia fit"<<std::endl;
         fdapde_assert(distr_[worker_id] != nullptr);
         vector_t lambda(n_lambda);
         internals::for_each_index_and_args<sizeof...(Args)>(
@@ -91,31 +90,23 @@ std::cout<<"worker"<<worker_id<<" inizia fit"<<std::endl;
         // initialize mean vector
         vector_t y = y_;
         solver_.update_response_and_weights(worker_id,y, vector_t::Ones(n_obs_).asDiagonal());   // restore solver state
-std::cout<<"worker"<<worker_id<<" pesi respo aggi"<<std::endl;
         transform_[worker_id](mu_[worker_id], y); //mu modificata->VA RESO THREAD_SAFE 1 mu_ per ogni worker
         double Jold = std::numeric_limits<double>::max(), Jnew = 0;
         int n_iter = 0; //sostituito uso membro non thrad-safe n_iter_ = 0. (non mi sembra ci siano observer di n_iter_ tanto)
         while (n_iter < max_iter_ && std::abs(Jnew - Jold) > tol_) {
-std::cout<<"worker"<<worker_id<<" Winiz"<<std::endl;
             vector_t G = distr_[worker_id]->der_link(mu_[worker_id]);   // G^(k) = diag(g'(\mu^(k)_1), ..., g'(\mu^(k)_n))
             pW_[worker_id] = ((G.array().pow(2) * distr_[worker_id]->variance(mu_[worker_id]).array()).inverse()).matrix();
             py_[worker_id] = G.asDiagonal() * (y - mu_[worker_id]) + distr_[worker_id]->link(mu_[worker_id]);
-std::cout<<"worker"<<worker_id<<" Wsec"<<std::endl;
             // \argmin_{\beta, f} [ \norm(W^{1/2} * (y - X * \beta - f_n))^2 + P_{\lambda}(f) ]
 	    solver_.update_response_and_weights(worker_id, py_[worker_id], pW_[worker_id].asDiagonal());
-std::cout<<"worker"<<worker_id<<" Witre"<<std::endl;
             solver_.fit(worker_id, std::forward<Args>(args)...);
-std::cout<<"worker"<<worker_id<<" Wiquatt"<<std::endl;
             mu_[worker_id] = distr_[worker_id]->inv_link(fitted(worker_id));
             // prepare for next iteration
-std::cout<<"worker"<<worker_id<<" Wicincq"<<std::endl;
             double data_loss =
               (distr_[worker_id]->variance(mu_[worker_id]).array().sqrt().inverse().matrix().asDiagonal() * (y - mu_[worker_id])).squaredNorm() / n_obs_;
             Jold = Jnew;
-std::cout<<"worker"<<worker_id<<" Winizsei"<<std::endl;
             Jnew = data_loss + solver_.ftPf(worker_id,lambda);
 	    n_iter++;
-std::cout<<"worker"<<worker_id<<" it "<<n_iter<<std::endl;
         }
         return std::make_pair(solver_.f(worker_id), solver_.beta(worker_id));
     }
@@ -180,9 +171,7 @@ std::cout<<"worker"<<worker_id<<" it "<<n_iter<<std::endl;
             } 
             //esecuzione parallela
             int worker_id = singleton_threadpool::instance().index_worker();
-std::cout<<"worker"<<worker_id<<" deve fit "<<std::endl;
             model_->fit(worker_id, static_cast<double>(lambda)...);
-std::cout<<"worker"<<worker_id<<" ha fit "<<std::endl;
             std::array<double, StaticInputSize> lambda_vec {lambda...};
             if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]
                 edf_cache_[worker_id][lambda_vec] = model_->edf(r_, seed_, worker_id);

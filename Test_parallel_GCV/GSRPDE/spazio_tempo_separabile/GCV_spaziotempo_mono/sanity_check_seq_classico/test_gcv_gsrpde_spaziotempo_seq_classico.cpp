@@ -20,13 +20,13 @@ int main(int argc, char** argv) {
     int size = std::stoi(argv[1]);
     // geometry
     Triangulation<1, 1> T = Triangulation<1, 1>::Interval(0, 1, 4);
-    std::string mesh_path = "../../../../test/data/mesh/c_shaped/";
+    std::string mesh_path = "../../../../../test/data/mesh/c_shaped/";
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
     // data
     GeoFrame data(D, T);
-    auto& l1 = data.insert_scalar_layer<POINT, POINT>("l1", std::pair {"../../../../test/data/gsr/05/locs.csv", MESH_NODES});
-    l1.load_csv<double>("../../../../test/data/gsr/05/response.csv");
-    l1.load_csv<double>("../../../../test/data/gsr/05/design_matrix.csv");
+    auto& l1 = data.insert_scalar_layer<POINT, POINT>("l1", std::pair {"../../../../../test/data/gsr/05/locs.csv", MESH_NODES});
+    l1.load_csv<double>("../../../../../test/data/gsr/05/response.csv");
+    l1.load_csv<double>("../../../../../test/data/gsr/05/design_matrix.csv");
     // physics
     FeSpace Vh(D, P1<1>);   // linear finite element in space
     TrialFunction f(Vh);
@@ -54,8 +54,8 @@ int main(int argc, char** argv) {
     double log_max = -4.0;
     for (int i = 0; i < size; ++i) {
         double t = static_cast<double>(i) / (size - 1);   // in [0,1]
-        lambda_grid(i,0) = std::pow(10.0, log_min + t * (log_max - log_min));
-        lambda_grid(i,1) = std::pow(10.0, log_min + t * (log_max - log_min));
+        lambda_grid(i,0) = 1.491640405739802e-06;//std::pow(10.0, log_min + t * (log_max - log_min));
+        lambda_grid(i,1) = 1.491640405739802e-06;//std::pow(10.0, log_min + t * (log_max - log_min));
     }
     GridSearch<2> optimizer; 
     int granularity = -1;

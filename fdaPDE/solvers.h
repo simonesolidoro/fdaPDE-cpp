@@ -38,8 +38,8 @@ struct de_solver { };
 #include "src/solvers/fe_ls_elliptic_parallel_singleton.h"
 
 
-//#include "src/solvers/fe_ls_separable.h"
-#include "src/solvers/fe_ls_separable_parallel_singleton.h"
+#include "src/solvers/fe_ls_separable.h"
+//#include "src/solvers/fe_ls_separable_parallel_singleton.h"
 
 #include "src/solvers/fe_ls_parabolic.h"
 

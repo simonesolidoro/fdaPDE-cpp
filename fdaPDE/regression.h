@@ -28,7 +28,8 @@
 //#include "src/models/sr_parallel_vector.h"
 //#include "src/models/sr_parallel.h"
 //#include "src/models/sr_parallel_singleton.h"
-#include "src/models/sr_parallel_singleton_shared_edf.h"
+//#include "src/models/sr_parallel_singleton_shared_edf.h"
+#include "src/models/sr_parallel_threaded_exe.h"
 //#include "src/models/sr.h"
 
 #include "src/models/gsr.h"

@@ -109,37 +109,87 @@ class SRPDE {
         template <typename... LambdaT>
             requires(std::is_convertible_v<LambdaT, double> && ...) && (sizeof...(LambdaT) == StaticInputSize)
         constexpr double operator()(LambdaT... lambda) {
-            if(singleton_threadpool::status()){
-                if(!ready_per_parallelo){
-                    std::lock_guard<std::mutex> lock(m_gcv_);
-                    if(!ready_per_parallelo){
-                        int n_worker = parallel_get_num_threads();
-                        model_->prepara_per_parallelo(n_worker);
-                        edf_cache_.resize(n_worker);
-                        for (int i = 1; i<n_worker; i++){
-                            edf_cache_[i] = edf_cache_[0];
-                        }
-                    } // lettura di nuovo di flag dentro al mutex così affidabile (dovrei mettere atomic e memory order, per il mommento lascio così poi se c'è tempo ci torno)
-                    ready_per_parallelo = true;
-                } 
-                //esecuzione parallela
-                int worker_id = this_thread_id();
-                model_->fit(worker_id,static_cast<double>(lambda)...);
-                std::array<double, StaticInputSize> lambda_vec {lambda...};
-                if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]
-                    edf_cache_[worker_id][lambda_vec] = model_->edf(r_, seed_, worker_id);
-                }
-                double dor = n_ - (q_ + edf_cache_[worker_id].at(lambda_vec));   // residual degrees of freedom
-                return (n_ / std::pow(dor, 2)) * (model_->fitted(worker_id) - model_->response()).squaredNorm();
-            }else{
-                model_->fit(0,static_cast<double>(lambda)...);
-                std::array<double, StaticInputSize> lambda_vec {lambda...};
-                if (edf_cache_[0].find(lambda_vec) == edf_cache_[0].end()) {   // cache Tr[S]
-                    edf_cache_[0][lambda_vec] = model_->edf(r_, seed_, 0);
-                }
-                double dor = n_ - (q_ + edf_cache_[0].at(lambda_vec));   // residual degrees of freedom
-                return (n_ / std::pow(dor, 2)) * (model_->fitted(0) - model_->response()).squaredNorm();
+            model_->fit(0,static_cast<double>(lambda)...);
+            std::array<double, StaticInputSize> lambda_vec {lambda...};
+            if (edf_cache_[0].find(lambda_vec) == edf_cache_[0].end()) {   // cache Tr[S]
+                edf_cache_[0][lambda_vec] = model_->edf(r_, seed_, 0);
             }
+            double dor = n_ - (q_ + edf_cache_[0].at(lambda_vec));   // residual degrees of freedom
+            return (n_ / std::pow(dor, 2)) * (model_->fitted(0) - model_->response()).squaredNorm();
+        }
+        // observers
+        const edf_cache_t& edf_cache(int worker_id = 0) const { return edf_cache_[worker_id]; }
+        edf_cache_t& edf_cache(int worker_id = 0) { return edf_cache_[worker_id]; }
+       private:
+        int n_worker = 1; //mi sa inutile
+        SRPDE* model_;
+        int n_ = 0, q_ = 0;
+        //non serve sia vettore tanto è sequenziale (poi lo cambio)
+        std::vector<edf_cache_t> edf_cache_{1};// da cambiare con std::vector<edf_cache_t> edf_cache_ = std::vector<edf_cache_t> (1); //per ora vector, poi meglio globale e accesso sicuro tramite shared-mutex  
+        // stochastic edf approximation parameter
+        int r_, seed_;
+    };
+    gcv_t gcv() { return gcv_t(this); }
+    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache) { return gcv_t(this, edf_cache); }
+    gcv_t gcv(int r, int seed) { 
+        //std::cout<<"threadid: "<<std::this_thread::get_id()<<" chaìiama .gcv(r,seed)"<<std::endl;
+        return gcv_t(this, r, seed); }
+    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
+
+
+        // Generalized Cross Validation index PARALLEL
+    struct gcv_par_t : public ScalarFieldBase<n_lambda, gcv_par_t> {
+        using Base = ScalarFieldBase<1, gcv_par_t>;
+        static constexpr int StaticInputSize = n_lambda;
+        static constexpr int NestAsRef = 0;
+        static constexpr int XprBits = 0;
+        using Scalar = double;
+        using InputType = Vector<Scalar, StaticInputSize>;
+        using edf_cache_t = std::unordered_map<
+          std::array<double, StaticInputSize>, double, internals::std_array_hash<double, StaticInputSize>>;
+
+        gcv_par_t() noexcept = default;
+        gcv_par_t(SRPDE* model, const std::vector<edf_cache_t>& edf_cache) :
+            model_(model),
+            n_(model->n_obs()),
+            q_(model->n_covs()),
+            edf_cache_(edf_cache),
+            r_(100),
+            seed_(random_seed) { }
+        gcv_par_t(SRPDE* model, const std::vector<edf_cache_t>& edf_cache, int r, int seed) :
+            model_(model), n_(model->n_obs()), q_(model->n_covs()), edf_cache_(edf_cache), r_(r), seed_(seed) {}
+        gcv_par_t(SRPDE* model) : gcv_par_t(model, std::vector<edf_cache_t>(1)) { }
+        gcv_par_t(SRPDE* model, int r, int seed) : gcv_par_t(model, std::vector<edf_cache_t>(1), r, seed) { }
+
+        template <typename InputType_>
+            requires(internals::is_subscriptable<InputType_, int>)
+        constexpr double operator()(const InputType_& lambda) {
+            return internals::apply_index_pack<n_lambda>([&]<int... Ns_>() { return operator()(lambda[Ns_]...); });
+        }
+        template <typename... LambdaT>
+            requires(std::is_convertible_v<LambdaT, double> && ...) && (sizeof...(LambdaT) == StaticInputSize)
+        constexpr double operator()(LambdaT... lambda) {
+            if(!ready_per_parallelo){
+                std::lock_guard<std::mutex> lock(m_gcv_);
+                if(!ready_per_parallelo){
+                    int n_worker = parallel_get_num_threads();
+                    model_->prepara_per_parallelo(n_worker);
+                    edf_cache_.resize(n_worker);
+                    for (int i = 1; i<n_worker; i++){
+                        edf_cache_[i] = edf_cache_[0];
+                    }
+                } // lettura di nuovo di flag dentro al mutex così affidabile (dovrei mettere atomic e memory order, per il mommento lascio così poi se c'è tempo ci torno)
+                ready_per_parallelo = true;
+            } 
+            //esecuzione parallela
+            int worker_id = this_thread_id();
+            model_->fit(worker_id,static_cast<double>(lambda)...);
+            std::array<double, StaticInputSize> lambda_vec {lambda...};
+            if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]
+                edf_cache_[worker_id][lambda_vec] = model_->edf(r_, seed_, worker_id);
+            }
+            double dor = n_ - (q_ + edf_cache_[worker_id].at(lambda_vec));   // residual degrees of freedom
+            return (n_ / std::pow(dor, 2)) * (model_->fitted(worker_id) - model_->response()).squaredNorm();
         }
         // observers
         const edf_cache_t& edf_cache(int worker_id = 0) const { return edf_cache_[worker_id]; }
@@ -154,12 +204,12 @@ class SRPDE {
         bool ready_per_parallelo = false; //atomico ? credo di si
         std::mutex m_gcv_;
     };
-    gcv_t gcv() { return gcv_t(this); }
-    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache) { return gcv_t(this, edf_cache); }
-    gcv_t gcv(int r, int seed) { 
+    gcv_par_t gcv_par() { return gcv_par_t(this); }
+    gcv_par_t gcv_par(const typename std::vector<typename gcv_par_t::edf_cache_t>& edf_cache) { return gcv_par_t(this, edf_cache); }
+    gcv_par_t gcv_par(int r, int seed) { 
         //std::cout<<"threadid: "<<std::this_thread::get_id()<<" chaìiama .gcv(r,seed)"<<std::endl;
-        return gcv_t(this, r, seed); }
-    gcv_t gcv(const typename std::vector<typename gcv_t::edf_cache_t>& edf_cache, int r, int seed) { return gcv_t(this, edf_cache, r, seed); }
+        return gcv_par_t(this, r, seed); }
+    gcv_par_t gcv_par(const typename std::vector<typename gcv_par_t::edf_cache_t>& edf_cache, int r, int seed) { return gcv_par_t(this, edf_cache, r, seed); }
 
 // per il momento commento poi quando gcv parallelo funzionerà torniamo su test d'iptesi ed IC (speriamo di tornanci)
     // // inference

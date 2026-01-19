@@ -75,7 +75,7 @@ class SRPDE {
         }
         return fitted_;//non serve thread_local fitted_ perché variabile locale di funzione (ovviamente)
     }
-    void prepara_per_parallelo(){ solver_.prepara_per_parallelo();}
+    void prepara_per_parallelo(int n_worker){ solver_.prepara_per_parallelo(n_worker);}
 
     // Generalized Cross Validation index
     struct gcv_t : public ScalarFieldBase<n_lambda, gcv_t> {
@@ -113,8 +113,8 @@ class SRPDE {
                 if(!ready_per_parallelo){
                     std::lock_guard<std::mutex> lock(m_gcv_);
                     if(!ready_per_parallelo){
-                        model_->prepara_per_parallelo();
-                        int n_worker = singleton_threadpool::instance().n_workers();
+                        int n_worker = parallel_get_num_threads();
+                        model_->prepara_per_parallelo(n_worker);
                         edf_cache_.resize(n_worker);
                         for (int i = 1; i<n_worker; i++){
                             edf_cache_[i] = edf_cache_[0];
@@ -123,7 +123,7 @@ class SRPDE {
                     ready_per_parallelo = true;
                 } 
                 //esecuzione parallela
-                int worker_id = singleton_threadpool::instance().index_worker();
+                int worker_id = this_thread_id();
                 model_->fit(worker_id,static_cast<double>(lambda)...);
                 std::array<double, StaticInputSize> lambda_vec {lambda...};
                 if (edf_cache_[worker_id].find(lambda_vec) == edf_cache_[worker_id].end()) {   // cache Tr[S]

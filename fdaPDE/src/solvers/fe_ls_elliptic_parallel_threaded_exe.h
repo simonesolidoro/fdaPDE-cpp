@@ -476,8 +476,8 @@ struct fe_ls_elliptic {
     const matrix_t& U() const { return U_; }
     const matrix_t& V() const { return V_; }
 
-    void prepara_per_parallelo(){// vettori di dati non thread-safe sono dim = 1, questo li rende dimensione = n_worker copiando elemento0
-        n_worker = singleton_threadpool::instance().n_workers();
+    void prepara_per_parallelo(int n_workers){// vettori di dati non thread-safe sono dim = 1, questo li rende dimensione = n_worker copiando elemento0
+        n_worker = n_workers;
         // ridimensiona tutti i container a n_worker
         lambda_saved_.resize(n_worker);
         invA_.resize(n_worker);

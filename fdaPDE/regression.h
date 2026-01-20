@@ -32,8 +32,9 @@
 #include "src/models/sr_parallel_threaded_exe.h"
 //#include "src/models/sr.h"
 
-#include "src/models/gsr.h"
+//#include "src/models/gsr.h"
 //#include "src/models/gsr_parallel_singleton.h"
+#include "src/models/gsr_parallel_threaded_exe.h"
 
 //#include "src/models/qsr.h"
 #include "src/models/qsr_parallel_singleton.h"

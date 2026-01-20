@@ -1,0 +1,45 @@
+#!/bin/bash
+
+#PBS -S /bin/bash
+#PBS -l select=1:ncpus=1,walltime=24:00:00
+#PBS -j oe
+#PBS -N GCV_SRPDE_spazio
+
+FILENAME="test_sr_gcv_parallel_threaded_exe"
+
+cd "${PBS_O_WORKDIR}"
+
+# clean log
+rm -f log.txt compile.txt
+echo "cleaning log files..." >> log.txt
+
+# init spack
+echo "loading spack" >> log.txt
+if [ ! -f "${HOME}/spack.sh" ]; then
+    echo "spack configuration file not found" >> log.txt
+    exit 1
+fi
+source "${HOME}/spack.sh" >> log.txt 2>&1
+
+echo "loading fdapde_devel environment" >> log.txt
+spack env activate fdapde_devel >> log.txt 2>&1
+
+# check packages
+EIGEN_LOC="$(spack location -i eigen)"
+if [ -z "$EIGEN_LOC" ]; then
+    echo "Eigen dependency not found" >> log.txt
+    exit 1
+fi
+echo "Eigen library found at ${EIGEN_LOC}" >> log.txt
+
+# compile
+echo "compiling..." >> log.txt
+g++ -o $FILENAME $FILENAME.cpp \
+    -I./../../../../fdaPDE-cpp \
+    -I./../../../../fdaPDE-cpp/fdaPDE/core \
+    -I"$EIGEN_LOC/include/eigen3" \
+    -march=native -O2 -std=c++20 >> compile.txt 2>&1
+
+# run
+echo "launching executable..." >> log.txt
+./$FILENAME >> log.txt

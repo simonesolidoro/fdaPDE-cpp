@@ -2,15 +2,15 @@
 using namespace fdapde;
 
 int main(int argc, char** argv){
-    if(argc < 2){std::cerr<<"in input: granularity \n";}
-    int granularity = std::stoi(argv[1]);
+    if(argc < 2){std::cerr<<"in input: size \n";}
+    int size = std::stoi(argv[1]);
     // geometry
-    std::string mesh_path = "../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
+    std::string mesh_path = "../../../test/data/mesh/unit_square_21/";// unit_square_60 in test 01
     Triangulation<2, 2> D(mesh_path + "points.csv", mesh_path + "elements.csv", mesh_path + "boundary.csv", true, true);
     // data
     GeoFrame data(D);
     auto& l1 = data.insert_scalar_layer<POINT>("l1", MESH_NODES);
-    l1.load_csv<double>("../../test/data/sr/04/response.csv"); //con 60 in test 01 
+    l1.load_csv<double>("../../../test/data/sr/04/response.csv"); //con 60 in test 01 
     // physics
     FeSpace Vh(D, P1<1>);
     TrialFunction f(Vh);
@@ -21,19 +21,24 @@ int main(int argc, char** argv){
     // modeling
     SRPDE m("y ~ f", data, fe_ls_elliptic(a, F));
     // calibration
-    std::vector<double> lambda_grid(130);
-    for (int i = 0; i < 130; ++i) { lambda_grid[i] = std::pow(10, -6.0 + 0.05 * i) / data[0].rows(); }
+    std::vector<double> lambda_grid(size);
+    double log_min = -9.0;
+    double log_max = -4.0;
+    for (int i = 0; i < size; ++i) {
+        double t = static_cast<double>(i) / (size - 1);   // in [0,1]
+        lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
+    }
     GridSearch<1> optimizer; 
     
     auto start = std::chrono::high_resolution_clock::now();
-    optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,granularity);
+    optimizer.optimize(fdapde::execution_par, m.gcv_par(100, 476813), lambda_grid);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
     std::cout<<duration.count()<<" ";
     //optimizer.optimize(m.gcv(100, 476813), lambda_grid, execution::par,Tp,granularity);
     
-
-    std::cout<<"ottimo"<<optimizer.optimum()<<"value:"<<optimizer.value();
+std::cout << std::setprecision(17);
+    std::cout<<"ottimo"<<optimizer.optimum()<<"value:"<<optimizer.value()<<std::endl;
     m.fit(0,optimizer.optimum());
     Eigen::Matrix<double, Dynamic, 1> f_ = m.f(0);
 

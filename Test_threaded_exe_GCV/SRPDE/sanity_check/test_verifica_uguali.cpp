@@ -19,8 +19,7 @@ int main() {
         return 0;
     }
 
-    const double atol = 1e-12;
-    const double rtol = 1e-10;
+    const double atol = 1e-14;
 
     double max_diff = 0.0;
 
@@ -28,7 +27,7 @@ int main() {
         double diff = std::abs(v1[i] - v2[i]);
         max_diff = std::max(max_diff, diff);
 
-        if (diff > atol + rtol * std::abs(v2[i])) {
+        if (diff > atol) {
             std::cout << "No File diversi\n";
             std::cout << "Indice " << i
                       << " : " << v1[i] << " vs " << v2[i] << "\n";

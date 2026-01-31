@@ -38,9 +38,10 @@ int main() {
             double t = static_cast<double>(i) / (size - 1);   // in [0,1]
             lambda_grid[i] = std::pow(10.0, log_min + t * (log_max - log_min));
         }
+        int granularity = 10;
         GridSearch<1> optimizer; 
         auto start = std::chrono::high_resolution_clock::now();
-        optimizer.optimize(fdapde::execution_par, m.gcv_par(100, 476813), lambda_grid);
+        optimizer.optimize(fdapde::execution_par, m.gcv_par(100, 476813), lambda_grid, granularity);
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);  
         std::cout<<duration.count()<<" ";

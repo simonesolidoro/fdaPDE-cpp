@@ -4,7 +4,7 @@ using namespace fdapde;
 
 int main(int argc, char** argv){
     int runs = 1;
-    int n_lambda = 4; //160; //std::stoi(argv[3]);
+    int n_lambda = 160; //160; //std::stoi(argv[3]);
 
     std::cout<<"SRPDE GCV spazio-tempo monolitico thread: "<<" ";
     for(int run = 0; run < runs; run ++){
